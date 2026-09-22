@@ -16,6 +16,8 @@ export interface TemplateField {
   label: string;
   field_type: FieldType;
   semantic_type?: string | null;
+  semantic_type_origin?: "unknown" | "rule" | "model" | "human";
+  semantic_type_confidence?: number | null;
   required?: boolean | null;
   writable: boolean;
   location: Location;
@@ -24,6 +26,13 @@ export interface TemplateField {
   current_value?: unknown;
   repeating_group_id?: string | null;
   notes?: string | null;
+  label_origin?: "native" | "layout" | "human";
+  label_confidence?: number | null;
+  label_evidence?: Array<{ text: string; page: number; rect: number[]; coordinate_system: string; source: "native-text" | "reducto"; relation: string }>;
+  review_state?: "needs_review" | "confirmed";
+  widgets?: Location[];
+  widget_count?: number;
+  widget_options?: Array<{ export_value?: string | null; label?: string | null; location: Location }>;
 }
 
 export interface TemplateSchema {

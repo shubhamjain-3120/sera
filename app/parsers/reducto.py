@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 import httpx
@@ -19,7 +20,15 @@ class ReductoParserAdapter:
         response = self.client.post(
             "/parse",
             files={"file": (filename, content)},
-            data={"options": '{"ocr_mode":"standard","table_output_format":"html"}'},
+            data={
+                "config": json.dumps(
+                    {
+                        "force_url_result": True,
+                        "ocr_mode": "standard",
+                        "table_output_format": "html",
+                    }
+                )
+            },
         )
         response.raise_for_status()
         payload = response.json()
@@ -27,6 +36,38 @@ class ReductoParserAdapter:
         if not job_id:
             raise RuntimeError("Reducto response did not contain a job id")
         return str(job_id)
+
+    def parse(self, filename: str, content: bytes) -> CanonicalParse:
+        """Run the documented synchronous parse flow and normalize URL-backed results."""
+        response = self.client.post(
+            "/parse",
+            files={"file": (filename, content)},
+            data={
+                "config": json.dumps(
+                    {
+                        "force_url_result": True,
+                        "ocr_mode": "standard",
+                        "table_output_format": "html",
+                    }
+                )
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        result_wrapper = payload.get("result", {})
+        if result_wrapper.get("type") == "url":
+            result_response = self.client.get(result_wrapper["url"])
+            result_response.raise_for_status()
+            result = result_response.json()
+        else:
+            result = result_wrapper.get("result", result_wrapper)
+        job_id = payload.get("job_id") or payload.get("id")
+        return CanonicalParse(
+            blocks=self._normalize_blocks(result),
+            raw=payload,
+            provider_job_id=str(job_id) if job_id else None,
+            parser_version="reducto-v1",
+        )
 
     def poll(self, job_id: str) -> CanonicalParse | None:
         response = self.client.get(f"/parse/{job_id}")
@@ -58,4 +99,3 @@ class ReductoParserAdapter:
                 }
             )
         return blocks
-

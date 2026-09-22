@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     storage_root: Path = Path("./data/objects")
     redis_url: str = "redis://localhost:6379/0"
     reducto_api_key: str | None = None
-    reducto_base_url: str = "https://platform.reducto.ai"
+    reducto_base_url: str = "https://api.reducto.ai/v1"
     s3_endpoint_url: str = "http://localhost:9000"
     s3_access_key: str = "formfiller"
     s3_secret_key: str = "formfiller-local-secret"
@@ -23,4 +23,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

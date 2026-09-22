@@ -39,6 +39,7 @@ app = FastAPI(title="AI Form Filler", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):51\d{2}$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,7 +84,9 @@ async def upload_artifact(background: BackgroundTasks, db: Db, file: UploadFile 
     key, sha256, size = storage.put_immutable(file.file, suffix)
     if size > settings.max_upload_bytes:
         raise HTTPException(413, "File exceeds configured upload limit")
-    existing = db.scalar(select(Artifact).where(Artifact.sha256 == sha256, Artifact.filename == file.filename))
+    # Storage keys are content-addressed, so identical bytes must reuse the
+    # existing artifact even when the local upload filename differs.
+    existing = db.scalar(select(Artifact).where(Artifact.sha256 == sha256))
     artifact = existing or Artifact(
         filename=file.filename or f"upload{suffix}",
         media_type=file.content_type or ("application/pdf" if suffix == ".pdf" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),

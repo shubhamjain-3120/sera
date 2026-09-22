@@ -15,11 +15,28 @@ class Location(BaseModel):
     cell_range: str | None = None
 
 
+class LabelEvidence(BaseModel):
+    text: str
+    page: int
+    rect: list[float]
+    coordinate_system: str
+    source: Literal["native-text", "reducto"]
+    relation: str
+
+
+class WidgetOption(BaseModel):
+    export_value: str | None = None
+    label: str | None = None
+    location: Location
+
+
 class TemplateField(BaseModel):
     id: str
     label: str
     field_type: Literal["text", "number", "date", "boolean", "choice", "signature", "action", "unknown"] = "unknown"
     semantic_type: str | None = None
+    semantic_type_origin: Literal["unknown", "rule", "model", "human"] = "unknown"
+    semantic_type_confidence: float | None = Field(default=None, ge=0, le=1)
     required: bool | None = None
     writable: bool = True
     location: Location
@@ -28,6 +45,13 @@ class TemplateField(BaseModel):
     current_value: Any = None
     repeating_group_id: str | None = None
     notes: str | None = None
+    label_origin: Literal["native", "layout", "human"] = "native"
+    label_confidence: float | None = Field(default=None, ge=0, le=1)
+    label_evidence: list[LabelEvidence] = Field(default_factory=list)
+    review_state: Literal["needs_review", "confirmed"] = "needs_review"
+    widgets: list[Location] = Field(default_factory=list)
+    widget_count: int = Field(default=1, ge=1)
+    widget_options: list[WidgetOption] = Field(default_factory=list)
 
 
 class RepeatingGroup(BaseModel):

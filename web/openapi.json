@@ -645,6 +645,51 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "LabelEvidence": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "rect": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Rect"
+          },
+          "coordinate_system": {
+            "type": "string",
+            "title": "Coordinate System"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "native-text",
+              "reducto"
+            ],
+            "title": "Source"
+          },
+          "relation": {
+            "type": "string",
+            "title": "Relation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "page",
+          "rect",
+          "coordinate_system",
+          "source",
+          "relation"
+        ],
+        "title": "LabelEvidence"
+      },
       "Location": {
         "properties": {
           "kind": {
@@ -934,6 +979,30 @@
             ],
             "title": "Semantic Type"
           },
+          "semantic_type_origin": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "rule",
+              "model",
+              "human"
+            ],
+            "title": "Semantic Type Origin",
+            "default": "unknown"
+          },
+          "semantic_type_confidence": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Semantic Type Confidence"
+          },
           "required": {
             "anyOf": [
               {
@@ -995,6 +1064,65 @@
               }
             ],
             "title": "Notes"
+          },
+          "label_origin": {
+            "type": "string",
+            "enum": [
+              "native",
+              "layout",
+              "human"
+            ],
+            "title": "Label Origin",
+            "default": "native"
+          },
+          "label_confidence": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label Confidence"
+          },
+          "label_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/LabelEvidence"
+            },
+            "type": "array",
+            "title": "Label Evidence"
+          },
+          "review_state": {
+            "type": "string",
+            "enum": [
+              "needs_review",
+              "confirmed"
+            ],
+            "title": "Review State",
+            "default": "needs_review"
+          },
+          "widgets": {
+            "items": {
+              "$ref": "#/components/schemas/Location"
+            },
+            "type": "array",
+            "title": "Widgets"
+          },
+          "widget_count": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Widget Count",
+            "default": 1
+          },
+          "widget_options": {
+            "items": {
+              "$ref": "#/components/schemas/WidgetOption"
+            },
+            "type": "array",
+            "title": "Widget Options"
           }
         },
         "type": "object",
@@ -1117,6 +1245,40 @@
           "published_at"
         ],
         "title": "VersionResponse"
+      },
+      "WidgetOption": {
+        "properties": {
+          "export_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Export Value"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "location": {
+            "$ref": "#/components/schemas/Location"
+          }
+        },
+        "type": "object",
+        "required": [
+          "location"
+        ],
+        "title": "WidgetOption"
       }
     }
   }

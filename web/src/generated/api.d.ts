@@ -227,6 +227,24 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** LabelEvidence */
+        LabelEvidence: {
+            /** Text */
+            text: string;
+            /** Page */
+            page: number;
+            /** Rect */
+            rect: number[];
+            /** Coordinate System */
+            coordinate_system: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "native-text" | "reducto";
+            /** Relation */
+            relation: string;
+        };
         /** Location */
         Location: {
             /**
@@ -313,6 +331,14 @@ export interface components {
             field_type: "text" | "number" | "date" | "boolean" | "choice" | "signature" | "action" | "unknown";
             /** Semantic Type */
             semantic_type?: string | null;
+            /**
+             * Semantic Type Origin
+             * @default unknown
+             * @enum {string}
+             */
+            semantic_type_origin: "unknown" | "rule" | "model" | "human";
+            /** Semantic Type Confidence */
+            semantic_type_confidence?: number | null;
             /** Required */
             required?: boolean | null;
             /**
@@ -331,6 +357,31 @@ export interface components {
             repeating_group_id?: string | null;
             /** Notes */
             notes?: string | null;
+            /**
+             * Label Origin
+             * @default native
+             * @enum {string}
+             */
+            label_origin: "native" | "layout" | "human";
+            /** Label Confidence */
+            label_confidence?: number | null;
+            /** Label Evidence */
+            label_evidence?: components["schemas"]["LabelEvidence"][];
+            /**
+             * Review State
+             * @default needs_review
+             * @enum {string}
+             */
+            review_state: "needs_review" | "confirmed";
+            /** Widgets */
+            widgets?: components["schemas"]["Location"][];
+            /**
+             * Widget Count
+             * @default 1
+             */
+            widget_count: number;
+            /** Widget Options */
+            widget_options?: components["schemas"]["WidgetOption"][];
         };
         /** TemplateSchema */
         TemplateSchema: {
@@ -376,6 +427,14 @@ export interface components {
              * Format: date-time
              */
             published_at: string;
+        };
+        /** WidgetOption */
+        WidgetOption: {
+            /** Export Value */
+            export_value?: string | null;
+            /** Label */
+            label?: string | null;
+            location: components["schemas"]["Location"];
         };
     };
     responses: never;

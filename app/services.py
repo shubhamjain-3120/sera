@@ -1,13 +1,16 @@
 import hashlib
 import json
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.inspectors import inspect_pdf, inspect_xlsx
 from app.models import ProcessingRun, RunStatus, TemplateDraft, TemplateVersion
+from app.parsers.reducto import ReductoParserAdapter
 from app.schemas import TemplateSchema
 from app.storage import ObjectStorage
 
@@ -26,10 +29,34 @@ def inspect_artifact(session: Session, storage: ObjectStorage, run_id: str) -> N
     session.commit()
     try:
         with storage.open(run.artifact.storage_key) as source:
-            if run.artifact.kind.value == "pdf":
-                schema = inspect_pdf(source)
-            else:
-                schema = inspect_xlsx(source)
+            content = source.read()
+        if run.artifact.kind.value == "pdf":
+            provider_blocks = None
+            provider_error = None
+            settings = get_settings()
+            if settings.reducto_api_key:
+                try:
+                    parsed = ReductoParserAdapter(
+                        settings.reducto_api_key, settings.reducto_base_url
+                    ).parse(run.artifact.filename, content)
+                    provider_blocks = parsed.blocks
+                    run.provider = "reducto+native"
+                    run.provider_job_id = parsed.provider_job_id
+                    run.parser_version = parsed.parser_version
+                    run.raw_result = parsed.raw
+                    run.config_snapshot = {
+                        "provider": "reducto",
+                        "layout_reconciliation": "geometry-v1",
+                    }
+                except Exception as exc:
+                    provider_error = f"{type(exc).__name__}: {exc}"
+            schema = inspect_pdf(BytesIO(content), provider_blocks)
+            if provider_error:
+                schema["inspection"]["warnings"].append(
+                    f"Reducto enrichment failed; native layout was used: {provider_error}"
+                )
+        else:
+            schema = inspect_xlsx(BytesIO(content))
         run.progress = 90
         run.result = schema
         draft = session.scalar(select(TemplateDraft).where(TemplateDraft.artifact_id == run.artifact_id))

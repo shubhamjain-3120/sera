@@ -1,6 +1,7 @@
 import io
 
 from pypdf import PdfWriter
+from pypdf.generic import ArrayObject, DictionaryObject, NameObject, TextStringObject
 
 from app.inspectors.pdf import inspect_pdf
 
@@ -72,3 +73,36 @@ def test_flat_and_rotated_pdf_fixtures_are_explicit():
     rotated_writer.write(rotated)
     result = inspect_pdf(io.BytesIO(rotated.getvalue()))
     assert result["fields"][0]["location"]["rotation"] == 90
+
+
+def test_widgets_with_the_same_parent_are_one_logical_field():
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    parent = DictionaryObject(
+        {
+            NameObject("/FT"): NameObject("/Btn"),
+            NameObject("/T"): TextStringObject("Has safety program"),
+            NameObject("/Kids"): ArrayObject(),
+        }
+    )
+    parent_reference = writer._add_object(parent)
+    for rect in ([10, 10, 20, 20], [30, 10, 40, 20]):
+        annotation = writer.add_annotation(
+            0,
+            {
+                "/Type": "/Annot",
+                "/Subtype": "/Widget",
+                "/Rect": rect,
+                "/Parent": parent_reference,
+            },
+        )
+        parent["/Kids"].append(annotation.indirect_reference)
+    output = io.BytesIO()
+    writer.write(output)
+
+    result = inspect_pdf(io.BytesIO(output.getvalue()))
+    assert result["inspection"]["widget_count"] == 2
+    assert result["inspection"]["logical_field_count"] == 1
+    assert len(result["fields"]) == 1
+    assert result["fields"][0]["widget_count"] == 2
+    assert len(result["fields"][0]["widgets"]) == 2
