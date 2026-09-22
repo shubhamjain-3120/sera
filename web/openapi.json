@@ -1,0 +1,1123 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AI Form Filler",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_api_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Api V1 Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts": {
+      "get": {
+        "summary": "List Artifacts",
+        "operationId": "list_artifacts_api_v1_artifacts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ArtifactResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Artifacts Api V1 Artifacts Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Upload Artifact",
+        "operationId": "upload_artifact_api_v1_artifacts_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_artifact_api_v1_artifacts_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{artifact_id}/content": {
+      "get": {
+        "summary": "Artifact Content",
+        "operationId": "artifact_content_api_v1_artifacts__artifact_id__content_get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{artifact_id}/pages/{page}.png": {
+      "get": {
+        "summary": "Pdf Page",
+        "operationId": "pdf_page_api_v1_artifacts__artifact_id__pages__page__png_get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Page"
+            }
+          },
+          {
+            "name": "scale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "maximum": 3,
+              "minimum": 0.5,
+              "default": 1.5,
+              "title": "Scale"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{artifact_id}/sheets/{sheet_name}/grid": {
+      "get": {
+        "summary": "Sheet Grid",
+        "operationId": "sheet_grid_api_v1_artifacts__artifact_id__sheets__sheet_name__grid_get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          },
+          {
+            "name": "sheet_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sheet Name"
+            }
+          },
+          {
+            "name": "min_row",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Min Row"
+            }
+          },
+          {
+            "name": "max_row",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "default": 50,
+              "title": "Max Row"
+            }
+          },
+          {
+            "name": "min_col",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Min Col"
+            }
+          },
+          {
+            "name": "max_col",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "default": 20,
+              "title": "Max Col"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Sheet Grid Api V1 Artifacts  Artifact Id  Sheets  Sheet Name  Grid Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/processing-runs/{run_id}": {
+      "get": {
+        "summary": "Get Run",
+        "operationId": "get_run_api_v1_processing_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/templates/{draft_id}": {
+      "get": {
+        "summary": "Get Draft",
+        "operationId": "get_draft_api_v1_templates__draft_id__get",
+        "parameters": [
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Draft Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Put Draft",
+        "operationId": "put_draft_api_v1_templates__draft_id__put",
+        "parameters": [
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Draft Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/templates/{draft_id}/publish": {
+      "post": {
+        "summary": "Publish",
+        "operationId": "publish_api_v1_templates__draft_id__publish_post",
+        "parameters": [
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Draft Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/templates/{draft_id}/versions": {
+      "get": {
+        "summary": "Versions",
+        "operationId": "versions_api_v1_templates__draft_id__versions_get",
+        "parameters": [
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Draft Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VersionResponse"
+                  },
+                  "title": "Response Versions Api V1 Templates  Draft Id  Versions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ArtifactResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "media_type": {
+            "type": "string",
+            "title": "Media Type"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "draft_id": {
+            "type": "string",
+            "title": "Draft Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "filename",
+          "media_type",
+          "kind",
+          "sha256",
+          "size_bytes",
+          "created_at",
+          "run_id",
+          "draft_id"
+        ],
+        "title": "ArtifactResponse"
+      },
+      "Body_upload_artifact_api_v1_artifacts_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_artifact_api_v1_artifacts_post"
+      },
+      "DraftResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "artifact_id": {
+            "type": "string",
+            "title": "Artifact Id"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/TemplateSchema"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "artifact_id",
+          "revision",
+          "name",
+          "schema",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "DraftResponse"
+      },
+      "DraftUpdate": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "title": "Expected Revision"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/TemplateSchema"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "schema"
+        ],
+        "title": "DraftUpdate"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Location": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "pdf_rect",
+              "xlsx_range"
+            ],
+            "title": "Kind"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "rect": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rect"
+          },
+          "rotation": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rotation"
+          },
+          "page_width": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Width"
+          },
+          "page_height": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Height"
+          },
+          "sheet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sheet"
+          },
+          "cell_range": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cell Range"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "Location"
+      },
+      "PublishRequest": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "title": "Expected Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_revision"
+        ],
+        "title": "PublishRequest"
+      },
+      "RepeatingGroup": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "field_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Field Ids"
+          },
+          "capacity": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Capacity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "capacity"
+        ],
+        "title": "RepeatingGroup"
+      },
+      "RunResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "artifact_id": {
+            "type": "string",
+            "title": "Artifact Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "progress": {
+            "type": "integer",
+            "title": "Progress"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "provider_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Job Id"
+          },
+          "parser_version": {
+            "type": "string",
+            "title": "Parser Version"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "artifact_id",
+          "status",
+          "stage",
+          "progress",
+          "provider",
+          "provider_job_id",
+          "parser_version",
+          "result",
+          "error",
+          "created_at",
+          "started_at",
+          "finished_at"
+        ],
+        "title": "RunResponse"
+      },
+      "TemplateField": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "field_type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "number",
+              "date",
+              "boolean",
+              "choice",
+              "signature",
+              "action",
+              "unknown"
+            ],
+            "title": "Field Type",
+            "default": "unknown"
+          },
+          "semantic_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Semantic Type"
+          },
+          "required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required"
+          },
+          "writable": {
+            "type": "boolean",
+            "title": "Writable",
+            "default": true
+          },
+          "location": {
+            "$ref": "#/components/schemas/Location"
+          },
+          "native_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Native Name"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Options"
+          },
+          "current_value": {
+            "title": "Current Value"
+          },
+          "repeating_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repeating Group Id"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "location"
+        ],
+        "title": "TemplateField"
+      },
+      "TemplateSchema": {
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/TemplateField"
+            },
+            "type": "array",
+            "title": "Fields"
+          },
+          "repeating_groups": {
+            "items": {
+              "$ref": "#/components/schemas/RepeatingGroup"
+            },
+            "type": "array",
+            "title": "Repeating Groups"
+          },
+          "inspection": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Inspection"
+          }
+        },
+        "type": "object",
+        "title": "TemplateSchema"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VersionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "draft_id": {
+            "type": "string",
+            "title": "Draft Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/TemplateSchema"
+          },
+          "source_revision": {
+            "type": "integer",
+            "title": "Source Revision"
+          },
+          "schema_sha256": {
+            "type": "string",
+            "title": "Schema Sha256"
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Published At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "draft_id",
+          "version",
+          "name",
+          "schema",
+          "source_revision",
+          "schema_sha256",
+          "published_at"
+        ],
+        "title": "VersionResponse"
+      }
+    }
+  }
+}

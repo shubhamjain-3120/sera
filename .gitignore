@@ -1,0 +1,19 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+*.db
+data/
+web/node_modules/
+web/dist/
+web/playwright-report/
+web/test-results/
+*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts
+input and filled form 1.zip
+input and filled form 2.zip
+samples/
