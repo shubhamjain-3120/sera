@@ -13,7 +13,7 @@ from app.models import (
     TemplateDraft,
     TemplateVersion,
 )
-from app.services import RevisionConflict, create_fill_plan, revise_fill_plan
+from app.services import RevisionConflict, create_fill_plan, revise_fill_plan, seed_agencies
 
 
 def fact(
@@ -199,6 +199,7 @@ def test_case_outputs_share_frozen_evidence_and_revisions_are_immutable():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     session = Session(engine)
+    seed_agencies(session)
     source = Artifact(
         filename="source.pdf",
         media_type="application/pdf",

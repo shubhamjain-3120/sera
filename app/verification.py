@@ -116,7 +116,7 @@ def deterministic_validate(payload: dict[str, Any]) -> dict[str, Any]:
             findings.append(_finding("type_mismatch", "blocker", target_id, "Selected value is not boolean.", source="deterministic"))
         if field_type == "choice" and not required_exception and field.get("options") and value not in field["options"]:
             findings.append(_finding("invalid_choice", "blocker", target_id, "Selected value is not an approved choice.", source="deterministic"))
-        if candidate.get("origin") == "evidence" and not candidate.get("provenance"):
+        if candidate.get("origin") in {"evidence", "agency"} and not candidate.get("provenance"):
             findings.append(_finding("missing_provenance", "blocker", target_id, "Evidence-backed value has no exact source location.", source="deterministic"))
         if candidate.get("origin") == "derivation":
             derivation = candidate.get("derivation") or {}

@@ -187,7 +187,7 @@ export interface MappingCandidate {
   unit?: string | null;
   date_context?: string | null;
   period_context?: string | null;
-  origin: "evidence" | "derivation" | "human";
+  origin: "evidence" | "derivation" | "human" | "agency";
   resolution: "direct" | "normalized" | "derived" | "human";
   evidence_confidence: number;
   match_score: number;
@@ -219,9 +219,24 @@ export interface FillPlanTarget {
   };
 }
 
+export interface Agency {
+  key: string;
+  name: string;
+  details: Record<string, string>;
+  is_default: boolean;
+}
+
+export interface CaseSummary {
+  case_key: string;
+  source_count: number;
+  snapshot_count: number;
+  created_at: string;
+}
+
 export interface FillPlanSummary {
   id: string;
   case_key: string;
+  agency_key?: string;
   template_version_id: string;
   template_name: string;
   target_artifact_id: string;

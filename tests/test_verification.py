@@ -3,6 +3,7 @@ import copy
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from app.agencies import DEFAULT_AGENCY_KEY
 from app.db import Base
 from app.models import (
     Artifact,
@@ -182,7 +183,7 @@ def test_persisted_report_is_revision_pinned_and_idempotent():
     bundle = EvidenceBundle(case_key="case-1", snapshot_ids=[snapshot.id], bundle_sha256="e" * 64)
     session.add(bundle)
     session.flush()
-    plan = FillPlan(case_key="case-1", template_version_id=version.id, evidence_bundle_id=bundle.id, current_revision=1)
+    plan = FillPlan(case_key="case-1", agency_key=DEFAULT_AGENCY_KEY, template_version_id=version.id, evidence_bundle_id=bundle.id, current_revision=1)
     session.add(plan)
     session.flush()
     plan_payload = payload(target("name", "applicant.legal_name", candidate(fact, "name")))

@@ -280,12 +280,19 @@
           {
             "name": "case_key",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 64,
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Case Key"
             }
           }
@@ -404,6 +411,99 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agencies": {
+      "get": {
+        "summary": "List Agencies",
+        "operationId": "list_agencies_api_v1_agencies_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AgencyResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Agencies Api V1 Agencies Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agencies/{agency_key}": {
+      "put": {
+        "summary": "Put Agency",
+        "operationId": "put_agency_api_v1_agencies__agency_key__put",
+        "parameters": [
+          {
+            "name": "agency_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agency Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgencyUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgencyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cases": {
+      "get": {
+        "summary": "List Cases",
+        "operationId": "list_cases_api_v1_cases_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CaseResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Cases Api V1 Cases Get"
                 }
               }
             }
@@ -990,6 +1090,66 @@
   },
   "components": {
     "schemas": {
+      "AgencyResponse": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "details": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Details"
+          },
+          "is_default": {
+            "type": "boolean",
+            "title": "Is Default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "details",
+          "is_default"
+        ],
+        "title": "AgencyResponse"
+      },
+      "AgencyUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "details": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Details"
+          }
+        },
+        "type": "object",
+        "required": [
+          "details"
+        ],
+        "title": "AgencyUpdate"
+      },
       "ArtifactResponse": {
         "properties": {
           "id": {
@@ -1071,6 +1231,35 @@
           "file"
         ],
         "title": "Body_upload_evidence_source_api_v1_evidence_sources_post"
+      },
+      "CaseResponse": {
+        "properties": {
+          "case_key": {
+            "type": "string",
+            "title": "Case Key"
+          },
+          "source_count": {
+            "type": "integer",
+            "title": "Source Count"
+          },
+          "snapshot_count": {
+            "type": "integer",
+            "title": "Snapshot Count"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "case_key",
+          "source_count",
+          "snapshot_count",
+          "created_at"
+        ],
+        "title": "CaseResponse"
       },
       "DerivationSpec": {
         "properties": {
@@ -1726,6 +1915,17 @@
               }
             ],
             "title": "Evidence Snapshot Ids"
+          },
+          "agency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agency Key"
           }
         },
         "type": "object",

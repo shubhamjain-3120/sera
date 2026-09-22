@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, Archive, Check, ChevronLeft, FileImage, FileSpreadsheet, FileText, ListChecks, LoaderCircle, Lock, Plus, Save, Search, ShieldCheck, Upload, X } from "lucide-react";
 import { API, api, type GridCell } from "./api";
-import type { Artifact, Draft, EvidenceFact, EvidenceLocation, EvidenceSource, FieldType, FillPlanTarget, Location, MappingCandidate, ReviewAction, ReviewDecision, TemplateField, VerificationFinding, VerificationReport } from "./types";
+import type { Agency, Artifact, Draft, EvidenceFact, EvidenceLocation, EvidenceSource, FieldType, FillPlanTarget, Location, MappingCandidate, ReviewAction, ReviewDecision, TemplateField, VerificationFinding, VerificationReport } from "./types";
 
 function App() {
   return <Routes><Route path="/" element={<Library />} /><Route path="/templates/:artifactId/:draftId" element={<Inspector />} /><Route path="/evidence" element={<EvidenceLibrary />} /><Route path="/evidence/process/:artifactId" element={<EvidenceRun />} /><Route path="/evidence/:artifactId/:snapshotId" element={<EvidenceInspector />} /><Route path="/fill-plans" element={<FillPlanLibrary />} /><Route path="/fill-plans/:fillPlanId" element={<FillPlanInspector />} /></Routes>;
@@ -50,17 +50,19 @@ function Library() {
 function EvidenceLibrary() {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [caseKey, setCaseKey] = useState("case-1");
+  // A case is derived from the upload batch: the first source starts one and
+  // the rest of the batch joins it, so different clients stay isolated.
+  const [caseKey, setCaseKey] = useState<string | null>(null);
   const client = useQueryClient();
   const { data = [], isLoading } = useQuery({ queryKey: ["evidence-sources"], queryFn: api.listEvidenceSources });
   const upload = useMutation({
-    mutationFn: (file: File) => api.uploadEvidenceSource(file, caseKey),
-    onSuccess: (source) => { client.invalidateQueries({ queryKey: ["evidence-sources"] }); navigate(`/evidence/process/${source.id}?run=${source.run_id}`); },
+    mutationFn: (file: File) => api.uploadEvidenceSource(file, caseKey ?? undefined),
+    onSuccess: (source) => { setCaseKey(source.case_key ?? null); client.invalidateQueries({ queryKey: ["evidence-sources"] }); client.invalidateQueries({ queryKey: ["cases"] }); navigate(`/evidence/process/${source.id}?run=${source.run_id}`); },
   });
   return <div className="app-shell">
     <header><Brand /><WorkspaceNav /><div className="phase-badge"><span /> Phase 5 · Human review</div></header>
     <main className="library evidence-library">
-      <section className="hero evidence-hero"><p className="eyebrow">Source evidence</p><h1>Trace every fact<br /><em>to its source.</em></h1><p>Parse PDFs, images, workbooks, and text into immutable evidence snapshots. Originals stay private and unchanged.</p><div className="upload-row"><select aria-label="Case" value={caseKey} onChange={(event) => setCaseKey(event.target.value)}><option value="case-1">Representative case 1</option><option value="case-2">Representative case 2</option><option value="synthetic">Synthetic test case</option></select><button className="primary" onClick={() => inputRef.current?.click()} disabled={upload.isPending}><Upload size={17} /> {upload.isPending ? "Ingesting…" : "Add source"}</button></div><input ref={inputRef} hidden type="file" accept=".pdf,.xlsx,.png,.jpg,.jpeg,.txt" onChange={(event) => event.target.files?.[0] && upload.mutate(event.target.files[0])} />{upload.error && <div className="error-banner">{upload.error.message}</div>}</section>
+      <section className="hero evidence-hero"><p className="eyebrow">Source evidence</p><h1>Trace every fact<br /><em>to its source.</em></h1><p>Parse PDFs, images, workbooks, and text into immutable evidence snapshots. Originals stay private and unchanged.</p><div className="upload-row"><span className="case-chip">{caseKey ? <><Lock size={12} /> Adding to {caseKey}</> : "Next upload starts a new case"}</span><button className="primary" onClick={() => inputRef.current?.click()} disabled={upload.isPending}><Upload size={17} /> {upload.isPending ? "Ingesting…" : caseKey ? "Add to this case" : "Add source"}</button>{caseKey && <button className="ghost" onClick={() => setCaseKey(null)}><Plus size={15} /> Start new case</button>}</div><input ref={inputRef} hidden type="file" accept=".pdf,.xlsx,.png,.jpg,.jpeg,.txt" onChange={(event) => event.target.files?.[0] && upload.mutate(event.target.files[0])} />{upload.error && <div className="error-banner">{upload.error.message}</div>}</section>
       <section className="recent"><div className="section-heading"><div><span className="eyebrow">Immutable snapshots</span><h2>Evidence sources</h2></div><span>{data.length} total</span></div>{isLoading ? <div className="empty"><LoaderCircle className="spin" /> Loading evidence</div> : data.length === 0 ? <button className="dropzone" onClick={() => inputRef.current?.click()}><Upload /><strong>Add a source document</strong><span>PDF, image, XLSX, or raw text. Filled reference outputs are rejected.</span></button> : <div className="artifact-grid">{data.map((source) => <EvidenceSourceCard key={source.id} source={source} />)}</div>}</section>
     </main>
   </div>;
@@ -97,7 +99,10 @@ function EvidenceView({ artifactId, data, snapshotHash }: { artifactId: string; 
   const [filter, setFilter] = useState("");
   const selected = data.facts.find((fact) => fact.id === selectedId);
   const visible = data.facts.filter((fact) => `${fact.label} ${String(fact.value ?? "explicitly absent")} ${fact.entity_role}`.toLowerCase().includes(filter.toLowerCase()));
-  return <div className="inspector evidence-inspector"><header><Brand /><div className="crumb"><ChevronLeft size={16} /><Link to="/evidence">Evidence</Link><span>/</span><strong>{data.source_sha256.slice(0, 12)}</strong></div><div className="snapshot-badge"><Lock size={13} /> Immutable · {snapshotHash.slice(0, 10)}</div></header><div className="workbench evidence-workbench"><aside className="field-list"><div className="panel-title"><div><p className="eyebrow">Extracted evidence</p><h2>{data.facts.length} facts</h2></div></div><label className="search"><Search size={15} /><input placeholder="Find a fact or entity" value={filter} onChange={(event) => setFilter(event.target.value)} /></label><div className="evidence-summary"><span>{data.facts.filter((fact) => fact.accepted).length} accepted</span><span>{data.unreadable_regions.length} unreadable</span></div><div className="field-scroll">{visible.map((fact, index) => <button key={fact.id} className={`field-row fact-row ${fact.id === selectedId ? "active" : ""}`} onClick={() => setSelectedId(fact.id)}><span className="field-number">{String(index + 1).padStart(2, "0")}</span><span><strong>{fact.label}</strong><small>{fact.value === null ? "Explicitly absent" : String(fact.value)} · {fact.entity_role}</small></span><i className={fact.accepted ? "fact-accepted" : "fact-review"} /></button>)}</div></aside><main className="preview-panel"><div className="preview-toolbar"><div><strong>Original source</strong><span> · read-only</span></div><div className="legend"><i className="selected" /> Exact provenance</div></div>{data.warnings.length ? <div className="warning"><AlertTriangle size={15} /> {data.warnings[0]}</div> : null}<EvidencePreview artifactId={artifactId} fact={selected} blocks={data.parse_blocks} /></main><aside className="properties">{selected ? <FactProperties fact={selected} parser={`${data.parser_provider} · ${data.parser_version}`} extractor={data.extractor_version} /> : <div className="empty-property"><Archive /><p>No facts were accepted. Review unreadable regions and parser warnings.</p></div>}</aside></div></div>;
+  useEffect(() => {
+    document.querySelector(`[data-fact-id="${selectedId}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [selectedId]);
+  return <div className="inspector evidence-inspector"><header><Brand /><div className="crumb"><ChevronLeft size={16} /><Link to="/evidence">Evidence</Link><span>/</span><strong>{data.source_sha256.slice(0, 12)}</strong></div><div className="snapshot-badge"><Lock size={13} /> Immutable · {snapshotHash.slice(0, 10)}</div></header><div className="workbench evidence-workbench"><aside className="field-list"><div className="panel-title"><div><p className="eyebrow">Extracted evidence</p><h2>{data.facts.length} facts</h2></div></div><label className="search"><Search size={15} /><input placeholder="Find a fact or entity" value={filter} onChange={(event) => setFilter(event.target.value)} /></label><div className="evidence-summary"><span>{data.facts.filter((fact) => fact.accepted).length} accepted</span><span>{data.unreadable_regions.length} unreadable</span></div><div className="field-scroll">{visible.map((fact, index) => <button key={fact.id} data-fact-id={fact.id} className={`field-row fact-row ${fact.id === selectedId ? "active" : ""}`} onClick={() => setSelectedId(fact.id)}><span className="field-number">{String(index + 1).padStart(2, "0")}</span><span><strong>{fact.label}</strong><small>{fact.value === null ? "Explicitly absent" : String(fact.value)} · {fact.entity_role}</small></span><i className={fact.accepted ? "fact-accepted" : "fact-review"} /></button>)}</div></aside><main className="preview-panel"><div className="preview-toolbar"><div><strong>Original source</strong><span> · read-only</span></div><div className="legend"><i className="selected" /> Exact provenance</div></div>{data.warnings.length ? <div className="warning"><AlertTriangle size={15} /> {data.warnings[0]}</div> : null}<EvidencePreview artifactId={artifactId} fact={selected} facts={data.facts} onSelect={setSelectedId} blocks={data.parse_blocks} /></main><aside className="properties">{selected ? <FactProperties fact={selected} parser={`${data.parser_provider} · ${data.parser_version}`} extractor={data.extractor_version} /> : <div className="empty-property"><Archive /><p>No facts were accepted. Review unreadable regions and parser warnings.</p></div>}</aside></div></div>;
 }
 
 function FactProperties({ fact, parser, extractor }: { fact: EvidenceFact; parser: string; extractor: string }) {
@@ -112,7 +117,7 @@ function formatEvidenceLocation(location?: EvidenceLocation) {
   return `Page ${location.page} · [${location.rect?.join(", ")}]`;
 }
 
-function EvidencePreview({ artifactId, fact, blocks }: { artifactId: string; fact?: EvidenceFact; blocks: Array<{ type: string; text: string; source: EvidenceLocation }> }) {
+function EvidencePreview({ artifactId, fact, facts, onSelect, blocks }: { artifactId: string; fact?: EvidenceFact; facts: EvidenceFact[]; onSelect: (factId: string) => void; blocks: Array<{ type: string; text: string; source: EvidenceLocation }> }) {
   const location = fact?.provenance[0];
   if (!location) return <div className="center">Select a fact to inspect its source.</div>;
   if (location.kind === "xlsx_range") {
@@ -122,32 +127,73 @@ function EvidencePreview({ artifactId, fact, blocks }: { artifactId: string; fac
   }
   if (location.kind === "text_span") return <div className="text-source">{blocks.filter((block) => block.source.kind === "text_span").map((block, index) => <p className={block.source.char_start === location.char_start ? "active" : ""} key={index}>{block.text}</p>)}</div>;
   const imageUrl = location.kind === "pdf_rect" ? `${API}/api/v1/artifacts/${artifactId}/pages/${location.page ?? 1}.png?scale=1.5` : `${API}/api/v1/artifacts/${artifactId}/content`;
-  const overlay = { id: fact!.id, label: fact!.label, field_type: "text" as const, writable: false, options: [], location: { kind: "pdf_rect" as const, page: location.page, rect: location.rect, rotation: location.rotation, page_width: location.page_width, page_height: location.page_height, coordinate_system: location.coordinate_system } };
-  return <div className="pdf-wrap"><div className="page-nav"><span>{location.kind === "image_rect" ? "Original image" : `Page ${location.page}`}</span></div><div className="paper"><img alt="Original evidence source" src={imageUrl} /><button aria-label={fact!.label} className="pdf-field active" style={pdfRectStyle(overlay.location)} /></div></div>;
+  // Every fact sharing this page is drawn so the source region can be clicked
+  // back to its extracted fact, not only the one already selected.
+  const onPage = facts.filter((item) => {
+    const spot = item.provenance[0];
+    return spot && spot.kind === location.kind && (spot.page ?? 1) === (location.page ?? 1) && spot.rect;
+  });
+  return <div className="pdf-wrap"><div className="page-nav"><span>{location.kind === "image_rect" ? "Original image" : `Page ${location.page}`}</span></div><div className="paper"><img alt="Original evidence source" src={imageUrl} />{onPage.map((item) => {
+    const spot = item.provenance[0];
+    const overlay = { kind: "pdf_rect" as const, page: spot.page, rect: spot.rect, rotation: spot.rotation, page_width: spot.page_width, page_height: spot.page_height, coordinate_system: spot.coordinate_system };
+    return <button key={item.id} aria-label={item.label} title={item.label} className={`pdf-field evidence-region ${item.id === fact!.id ? "active" : ""} ${item.accepted ? "" : "needs-review"}`} style={pdfRectStyle(overlay)} onClick={() => onSelect(item.id)} />;
+  })}</div></div>;
 }
 
 function FillPlanLibrary() {
   const navigate = useNavigate();
   const client = useQueryClient();
-  const [caseKey, setCaseKey] = useState("case-1");
+  const [caseKey, setCaseKey] = useState("");
+  const [agencyKey, setAgencyKey] = useState("");
   const plans = useQuery({ queryKey: ["fill-plans"], queryFn: api.listFillPlans });
   const templates = useQuery({ queryKey: ["artifacts"], queryFn: api.listArtifacts });
+  const cases = useQuery({ queryKey: ["cases"], queryFn: api.listCases });
+  const agencies = useQuery({ queryKey: ["agencies"], queryFn: api.listAgencies });
+  const activeCase = caseKey || cases.data?.[0]?.case_key || "";
+  const activeAgency = agencyKey || agencies.data?.find((item) => item.is_default)?.key || "";
   const create = useMutation({
     mutationFn: async (artifact: Artifact) => {
+      if (!activeCase) throw new Error("Ingest evidence for a case before creating a Fill Plan");
       const versions = await api.versions(artifact.draft_id);
       if (!versions.length) throw new Error("Publish this template before creating a Fill Plan");
-      return api.createFillPlan(caseKey, versions[0].id);
+      return api.createFillPlan(activeCase, versions[0].id, activeAgency);
     },
     onSuccess: (plan) => { client.invalidateQueries({ queryKey: ["fill-plans"] }); navigate(`/fill-plans/${plan.id}`); },
   });
   return <div className="app-shell">
     <header><Brand /><WorkspaceNav /><div className="phase-badge"><span /> Phase 5 · Human review</div></header>
     <main className="library fill-plan-library">
-      <section className="hero fill-plan-hero"><p className="eyebrow">Grounded mapping</p><h1>Map evidence.<br /><em>Expose uncertainty.</em></h1><p>Create a revisioned Fill Plan against a published template and a frozen case-evidence bundle. Nothing is written to the original target.</p><div className="upload-row"><select aria-label="Mapping case" value={caseKey} onChange={(event) => setCaseKey(event.target.value)}><option value="case-1">Representative case 1</option><option value="case-2">Representative case 2</option><option value="synthetic">Synthetic test case</option></select></div>{create.error && <div className="error-banner">{create.error.message}</div>}</section>
-      <section className="recent"><div className="section-heading"><div><span className="eyebrow">Published targets</span><h2>Start a Fill Plan</h2></div><span>{templates.data?.length ?? 0} templates</span></div><div className="artifact-grid">{templates.data?.map((artifact) => <button className="artifact-card mapping-create" key={artifact.id} onClick={() => create.mutate(artifact)} disabled={create.isPending}><div className={`file-icon ${artifact.kind}`}>{artifact.kind === "pdf" ? <FileText /> : <FileSpreadsheet />}</div><div><h3>{artifact.filename}</h3><p>Use latest published version · {caseKey}</p></div><Plus size={16} /></button>)}</div></section>
+      <section className="hero fill-plan-hero"><p className="eyebrow">Grounded mapping</p><h1>Map evidence.<br /><em>Expose uncertainty.</em></h1><p>Create a revisioned Fill Plan against a published template and a frozen case-evidence bundle. Nothing is written to the original target.</p><div className="upload-row"><label className="picker"><span>Agency</span><select aria-label="Filing agency" value={activeAgency} onChange={(event) => setAgencyKey(event.target.value)}>{agencies.data?.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}</select></label><label className="picker"><span>Case</span><select aria-label="Mapping case" value={activeCase} onChange={(event) => setCaseKey(event.target.value)}>{cases.data?.length ? cases.data.map((item) => <option key={item.case_key} value={item.case_key}>{item.case_key} · {item.source_count} source{item.source_count === 1 ? "" : "s"}</option>) : <option value="">No ingested cases yet</option>}</select></label></div>{create.error && <div className="error-banner">{create.error.message}</div>}</section>
+      {agencies.data && activeAgency && <AgencyDetails agency={agencies.data.find((item) => item.key === activeAgency)!} />}
+      <section className="recent"><div className="section-heading"><div><span className="eyebrow">Published targets</span><h2>Start a Fill Plan</h2></div><span>{templates.data?.length ?? 0} templates</span></div><div className="artifact-grid">{templates.data?.map((artifact) => <button className="artifact-card mapping-create" key={artifact.id} onClick={() => create.mutate(artifact)} disabled={create.isPending}><div className={`file-icon ${artifact.kind}`}>{artifact.kind === "pdf" ? <FileText /> : <FileSpreadsheet />}</div><div><h3>{artifact.filename}</h3><p>Use latest published version · {activeCase || "no case"}</p></div><Plus size={16} /></button>)}</div></section>
       <section className="recent"><div className="section-heading"><div><span className="eyebrow">Frozen proposals</span><h2>Fill Plans</h2></div><span>{plans.data?.length ?? 0} total</span></div>{plans.isLoading ? <div className="empty"><LoaderCircle className="spin" /> Loading Fill Plans</div> : plans.data?.length ? <div className="artifact-grid">{plans.data.map((plan) => <Link className="artifact-card" to={`/fill-plans/${plan.id}`} key={plan.id}><div className="file-icon mapping"><ListChecks /></div><div><h3>{plan.template_name}</h3><p>{plan.case_key} · Revision {plan.current_revision} · {plan.issue_count} issues</p></div>{plan.blocker_count ? <span className="blocker-count">{plan.blocker_count} blocked</span> : <span className="hash">ready</span>}</Link>)}</div> : <div className="empty">No Fill Plans yet. Publish a template and choose a case above.</div>}</section>
     </main>
   </div>;
+}
+
+const AGENCY_DETAIL_FIELDS: Array<[string, string]> = [
+  ["legal_name", "Legal name"], ["contact_name", "Contact"], ["address_line1", "Address"], ["address_line2", "Address line 2"],
+  ["city", "City"], ["state", "State"], ["postal_code", "ZIP code"], ["phone", "Phone"], ["fax", "Fax"],
+  ["email", "Email"], ["website", "Website"], ["producer_number", "Producer number"], ["license_number", "License number"], ["naic_code", "NAIC code"],
+];
+
+function AgencyDetails({ agency }: { agency: Agency }) {
+  const client = useQueryClient();
+  const [draft, setDraft] = useState<Record<string, string>>(agency.details);
+  const [open, setOpen] = useState(false);
+  useEffect(() => setDraft(agency.details), [agency.key, agency.details]);
+  const save = useMutation({
+    mutationFn: () => api.updateAgency(agency.key, draft),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["agencies"] }),
+  });
+  const dirty = AGENCY_DETAIL_FIELDS.some(([key]) => (draft[key] ?? "") !== (agency.details[key] ?? ""));
+  const filled = AGENCY_DETAIL_FIELDS.filter(([key]) => (agency.details[key] ?? "").trim()).length;
+  return <section className="recent agency-panel">
+    <div className="section-heading"><div><span className="eyebrow">Trusted source</span><h2>{agency.name} details</h2></div><button className="ghost" onClick={() => setOpen(!open)}>{filled} of {AGENCY_DETAIL_FIELDS.length} set · {open ? "Hide" : "Edit"}</button></div>
+    {open && <div className="agency-grid">{AGENCY_DETAIL_FIELDS.map(([key, label]) => <label key={key}><span>{label}</span><input value={draft[key] ?? ""} placeholder="—" onChange={(event) => setDraft({ ...draft, [key]: event.target.value })} /></label>)}</div>}
+    {open && <div className="agency-actions"><p>These values fill agency-owned fields on every form and are never taken from an applicant's documents.</p><button className="primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}><Save size={15} /> {save.isPending ? "Saving…" : "Save details"}</button></div>}
+    {save.error && <div className="error-banner">{save.error.message}</div>}
+  </section>;
 }
 
 function FillPlanInspector() {

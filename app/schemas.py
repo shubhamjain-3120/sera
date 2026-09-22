@@ -221,6 +221,26 @@ class FillPlanCreate(BaseModel):
     case_key: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
     template_version_id: str
     evidence_snapshot_ids: list[str] | None = None
+    agency_key: str | None = None
+
+
+class AgencyResponse(BaseModel):
+    key: str
+    name: str
+    details: dict[str, str]
+    is_default: bool
+
+
+class AgencyUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=256)
+    details: dict[str, str]
+
+
+class CaseResponse(BaseModel):
+    case_key: str
+    source_count: int
+    snapshot_count: int
+    created_at: datetime
 
 
 class DerivationSpec(BaseModel):

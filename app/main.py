@@ -5,14 +5,16 @@ from typing import Annotated
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.agencies import DETAIL_FACT_KEYS
 from app.config import get_settings
 from app.db import Base, SessionLocal, engine, get_db
 from app.inspectors.pdf import render_pdf_page
 from app.inspectors.xlsx import read_sheet_grid
 from app.models import (
+    Agency,
     Artifact,
     ArtifactKind,
     ArtifactPurpose,
@@ -27,7 +29,10 @@ from app.models import (
     VerificationReport,
 )
 from app.schemas import (
+    AgencyResponse,
+    AgencyUpdate,
     ArtifactResponse,
+    CaseResponse,
     DraftResponse,
     DraftUpdate,
     EvidenceSnapshotResponse,
@@ -48,9 +53,11 @@ from app.services import (
     create_fill_plan,
     ingest_evidence,
     inspect_artifact,
+    new_case_key,
     publish_draft,
     review_fill_plan,
     revise_fill_plan,
+    seed_agencies,
     update_draft,
     verify_fill_plan_revision,
 )
@@ -64,6 +71,8 @@ settings = get_settings()
 async def lifespan(_: FastAPI):
     Path("data").mkdir(exist_ok=True)
     Base.metadata.create_all(engine)
+    with SessionLocal() as session:
+        seed_agencies(session)
     yield
 
 
@@ -228,13 +237,17 @@ async def upload_evidence_source(
     background: BackgroundTasks,
     db: Db,
     file: UploadFile = File(...),
-    case_key: str = Query(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"),
+    case_key: str | None = Query(default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"),
 ) -> EvidenceSourceResponse:
     if settings.evidence_require_reducto and not settings.reducto_api_key:
         raise HTTPException(
             503,
             "Reducto is required for evidence ingestion. Configure REDUCTO_API_KEY and restart the API.",
         )
+    # Omitting the case starts a new isolated batch; the response carries the
+    # derived key so the rest of one upload batch joins the same case.
+    if case_key is None:
+        case_key = new_case_key(db)
     normalized_name = (file.filename or "").casefold()
     if any(marker in normalized_name for marker in ("filled", "reference output", "evaluation-only")):
         raise HTTPException(422, "Filled reference outputs are evaluation-only and cannot be evidence sources")
@@ -341,6 +354,58 @@ def get_evidence_snapshot(snapshot_id: str, db: Db) -> EvidenceSnapshot:
     return snapshot
 
 
+@app.get("/api/v1/agencies", response_model=list[AgencyResponse])
+def list_agencies(db: Db) -> list[Agency]:
+    return list(db.scalars(select(Agency).order_by(Agency.is_default.desc(), Agency.name)).all())
+
+
+@app.put("/api/v1/agencies/{agency_key}", response_model=AgencyResponse)
+def put_agency(agency_key: str, update: AgencyUpdate, db: Db) -> Agency:
+    agency = db.scalar(select(Agency).where(Agency.key == agency_key))
+    if agency is None:
+        raise HTTPException(404, "Agency not found")
+    unknown = set(update.details) - set(DETAIL_FACT_KEYS)
+    if unknown:
+        raise HTTPException(422, f"Unsupported agency detail keys: {', '.join(sorted(unknown))}")
+    agency.details = {**agency.details, **update.details}
+    if update.name:
+        agency.name = update.name
+    db.commit()
+    db.refresh(agency)
+    return agency
+
+
+@app.get("/api/v1/cases", response_model=list[CaseResponse])
+def list_cases(db: Db) -> list[CaseResponse]:
+    rows = db.execute(
+        select(
+            Artifact.case_key,
+            func.count(Artifact.id),
+            func.min(Artifact.created_at),
+        )
+        .where(Artifact.purpose == ArtifactPurpose.SOURCE, Artifact.case_key.is_not(None))
+        .group_by(Artifact.case_key)
+    ).all()
+    snapshot_counts = dict(
+        db.execute(
+            select(Artifact.case_key, func.count(EvidenceSnapshot.id))
+            .join(EvidenceSnapshot, EvidenceSnapshot.artifact_id == Artifact.id)
+            .where(Artifact.purpose == ArtifactPurpose.SOURCE)
+            .group_by(Artifact.case_key)
+        ).all()
+    )
+    cases = [
+        CaseResponse(
+            case_key=case_key,
+            source_count=source_count,
+            snapshot_count=snapshot_counts.get(case_key, 0),
+            created_at=created_at,
+        )
+        for case_key, source_count, created_at in rows
+    ]
+    return sorted(cases, key=lambda item: item.created_at, reverse=True)
+
+
 @app.get("/api/v1/processing-runs/{run_id}", response_model=RunResponse)
 def get_run(run_id: str, db: Db) -> RunResponse:
     run = db.get(ProcessingRun, run_id)
@@ -430,7 +495,7 @@ def post_fill_plan(request: FillPlanCreate, db: Db) -> FillPlanResponse:
         raise HTTPException(404, "Published template version not found")
     try:
         fill_plan = create_fill_plan(
-            db, request.case_key, version, request.evidence_snapshot_ids
+            db, request.case_key, version, request.evidence_snapshot_ids, request.agency_key
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc

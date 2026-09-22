@@ -7,7 +7,8 @@ from difflib import SequenceMatcher
 from typing import Any
 
 MAPPER_VERSION = "deterministic-mapper-v1"
-ROLE_WORDS = {"applicant", "business", "driver", "vehicle", "broker", "owner"}
+ROLE_WORDS = {"applicant", "business", "driver", "vehicle", "broker", "owner", "agency"}
+AGENCY_SNAPSHOT_ID = "agency-registry"
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
@@ -138,7 +139,7 @@ def _candidate(field: dict[str, Any], snapshot_id: str, fact: dict[str, Any], sc
         "unit": fact.get("unit"),
         "date_context": fact.get("date_context"),
         "period_context": fact.get("period_context"),
-        "origin": "evidence",
+        "origin": "agency" if snapshot_id == AGENCY_SNAPSHOT_ID else "evidence",
         "resolution": resolution,
         "evidence_confidence": fact.get("confidence", 0),
         "match_score": score,
@@ -154,8 +155,10 @@ def build_fill_plan(
     template_schema: dict[str, Any],
     snapshots: list[tuple[str, dict[str, Any]]],
     candidate_facts: dict[str, list[tuple[str, dict[str, Any]]]] | None = None,
+    agency_facts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     facts = [(snapshot_id, fact) for snapshot_id, snapshot in snapshots for fact in snapshot.get("facts", [])]
+    agency_pool = [(AGENCY_SNAPSHOT_ID, fact) for fact in agency_facts or []]
     targets: list[dict[str, Any]] = []
     issues: list[dict[str, Any]] = []
     all_candidates: dict[str, dict[str, Any]] = {}
@@ -164,7 +167,7 @@ def build_fill_plan(
         candidates: list[dict[str, Any]] = []
         writable = bool(field.get("writable", True)) and field.get("field_type") not in {"signature", "action"}
         if writable:
-            for snapshot_id, fact in (candidate_facts or {}).get(field["id"], facts):
+            for snapshot_id, fact in list((candidate_facts or {}).get(field["id"], facts)) + agency_pool:
                 if not _type_compatible(field.get("field_type", "unknown"), fact):
                     continue
                 score = _match_score(field, fact)

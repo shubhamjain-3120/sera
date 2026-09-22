@@ -8,12 +8,14 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.agencies import AGENCY_SOURCE_VERSION, SEED_AGENCIES, agency_facts
 from app.config import get_settings
 from app.evidence import extract_evidence, native_parse
 from app.evidence.retrieve import candidate_pools
 from app.inspectors import inspect_pdf, inspect_xlsx
 from app.mapping import MAPPER_VERSION, apply_revision, build_fill_plan
 from app.models import (
+    Agency,
     Artifact,
     EvidenceBundle,
     EvidenceSnapshot,
@@ -233,12 +235,56 @@ def publish_draft(session: Session, draft: TemplateDraft, expected_revision: int
     return version
 
 
+def seed_agencies(session: Session) -> None:
+    """Ensure the configured agencies exist without overwriting edited details."""
+    for seed in SEED_AGENCIES:
+        if session.scalar(select(Agency).where(Agency.key == seed["key"])) is None:
+            session.add(
+                Agency(
+                    key=seed["key"],
+                    name=seed["name"],
+                    details=dict(seed["details"]),
+                    is_default=seed["is_default"],
+                )
+            )
+    session.commit()
+
+
+def resolve_agency(session: Session, agency_key: str | None) -> Agency:
+    if agency_key:
+        agency = session.scalar(select(Agency).where(Agency.key == agency_key))
+        if agency is None:
+            raise ValueError(f"Unknown agency {agency_key}")
+        return agency
+    agency = session.scalar(select(Agency).where(Agency.is_default.is_(True)))
+    if agency is None:
+        raise ValueError("No default agency is configured")
+    return agency
+
+
+def new_case_key(session: Session) -> str:
+    """Derive a case identifier for one upload batch, keeping sources isolated."""
+    stamp = datetime.now(UTC).strftime("%Y%m%d")
+    existing = set(
+        session.scalars(
+            select(Artifact.case_key).where(Artifact.case_key.like(f"case-{stamp}-%"))
+        ).all()
+    )
+    for sequence in range(1, 1000):
+        candidate = f"case-{stamp}-{sequence:03d}"
+        if candidate not in existing:
+            return candidate
+    raise ValueError(f"Exhausted case identifiers for {stamp}")
+
+
 def create_fill_plan(
     session: Session,
     case_key: str,
     template_version: TemplateVersion,
     snapshot_ids: list[str] | None = None,
+    agency_key: str | None = None,
 ) -> FillPlan:
+    agency = resolve_agency(session, agency_key)
     if snapshot_ids is None:
         rows = session.execute(
             select(EvidenceSnapshot, Artifact)
@@ -292,6 +338,7 @@ def create_fill_plan(
         select(FillPlan).where(
             FillPlan.template_version_id == template_version.id,
             FillPlan.evidence_bundle_id == bundle.id,
+            FillPlan.agency_key == agency.key,
         )
     )
     if existing:
@@ -300,6 +347,7 @@ def create_fill_plan(
         template_version.schema,
         [(snapshot.id, snapshot.snapshot) for snapshot in ordered],
         candidate_pools(session, ordered, template_version.schema.get("fields", [])),
+        agency_facts({"key": agency.key, "name": agency.name, "details": agency.details}),
     )
     payload["evidence_bundle"] = {
         "id": bundle.id,
@@ -312,8 +360,14 @@ def create_fill_plan(
         "version": template_version.version,
         "schema_sha256": template_version.schema_sha256,
     }
+    payload["agency"] = {
+        "key": agency.key,
+        "name": agency.name,
+        "source_version": AGENCY_SOURCE_VERSION,
+    }
     fill_plan = FillPlan(
         case_key=case_key,
+        agency_key=agency.key,
         template_version_id=template_version.id,
         evidence_bundle_id=bundle.id,
     )

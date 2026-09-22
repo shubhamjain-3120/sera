@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from app.agencies import DEFAULT_AGENCY_KEY
 from app.db import Base
 from app.models import (
     Artifact,
@@ -196,6 +197,7 @@ def make_persisted_plan(session: Session) -> FillPlan:
     session.add_all([version, bundle])
     session.flush()
     plan = FillPlan(
+        agency_key=DEFAULT_AGENCY_KEY,
         case_key="case", template_version_id=version.id, evidence_bundle_id=bundle.id
     )
     session.add(plan)

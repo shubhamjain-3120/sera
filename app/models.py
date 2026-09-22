@@ -3,7 +3,17 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -134,15 +144,31 @@ class EvidenceBundle(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class Agency(Base):
+    """A filing agency whose own details are a trusted, non-document fact source."""
+
+    __tablename__ = "agencies"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(256))
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
 class FillPlan(Base):
     __tablename__ = "fill_plans"
     __table_args__ = (
+        # Agency details feed values into the plan, so the same template and
+        # evidence filed for a different agency is a different Fill Plan.
         UniqueConstraint(
-            "template_version_id", "evidence_bundle_id", name="uq_fill_plan_inputs"
+            "template_version_id", "evidence_bundle_id", "agency_key", name="uq_fill_plan_inputs"
         ),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     case_key: Mapped[str] = mapped_column(String(64), index=True)
+    agency_key: Mapped[str] = mapped_column(String(64), index=True)
     template_version_id: Mapped[str] = mapped_column(
         ForeignKey("template_versions.id"), index=True
     )

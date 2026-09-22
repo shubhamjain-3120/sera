@@ -125,6 +125,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agencies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Agencies */
+        get: operations["list_agencies_api_v1_agencies_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agencies/{agency_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Agency */
+        put: operations["put_agency_api_v1_agencies__agency_key__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Cases */
+        get: operations["list_cases_api_v1_cases_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/processing-runs/{run_id}": {
         parameters: {
             query?: never;
@@ -270,6 +321,28 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AgencyResponse */
+        AgencyResponse: {
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** Details */
+            details: {
+                [key: string]: string;
+            };
+            /** Is Default */
+            is_default: boolean;
+        };
+        /** AgencyUpdate */
+        AgencyUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Details */
+            details: {
+                [key: string]: string;
+            };
+        };
         /** ArtifactResponse */
         ArtifactResponse: {
             /** Id */
@@ -303,6 +376,20 @@ export interface components {
         Body_upload_evidence_source_api_v1_evidence_sources_post: {
             /** File */
             file: string;
+        };
+        /** CaseResponse */
+        CaseResponse: {
+            /** Case Key */
+            case_key: string;
+            /** Source Count */
+            source_count: number;
+            /** Snapshot Count */
+            snapshot_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** DerivationSpec */
         DerivationSpec: {
@@ -520,6 +607,8 @@ export interface components {
             template_version_id: string;
             /** Evidence Snapshot Ids */
             evidence_snapshot_ids?: string[] | null;
+            /** Agency Key */
+            agency_key?: string | null;
         };
         /** FillPlanResponse */
         FillPlanResponse: {
@@ -1154,8 +1243,8 @@ export interface operations {
     };
     upload_evidence_source_api_v1_evidence_sources_post: {
         parameters: {
-            query: {
-                case_key: string;
+            query?: {
+                case_key?: string | null;
             };
             header?: never;
             path?: never;
@@ -1214,6 +1303,81 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_agencies_api_v1_agencies_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgencyResponse"][];
+                };
+            };
+        };
+    };
+    put_agency_api_v1_agencies__agency_key__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agency_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgencyUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgencyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_cases_api_v1_cases_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaseResponse"][];
                 };
             };
         };
