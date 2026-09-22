@@ -151,3 +151,89 @@ export interface Draft {
   created_at: string;
   updated_at: string;
 }
+
+export interface TemplateVersion {
+  id: string;
+  draft_id: string;
+  version: number;
+  name: string;
+  schema: TemplateSchema;
+  source_revision: number;
+  schema_sha256: string;
+  published_at: string;
+}
+
+export interface MappingIssue {
+  id: string;
+  code: string;
+  severity: "info" | "review" | "blocker";
+  target_id: string;
+  message: string;
+}
+
+export interface MappingCandidate {
+  id: string;
+  target_field_id: string;
+  snapshot_id?: string | null;
+  source_artifact_id?: string | null;
+  fact_id?: string | null;
+  fact_key?: string | null;
+  entity_id?: string | null;
+  entity_role?: string | null;
+  value: unknown;
+  raw_value: string;
+  value_type: string;
+  unit?: string | null;
+  date_context?: string | null;
+  period_context?: string | null;
+  origin: "evidence" | "derivation";
+  resolution: "direct" | "normalized" | "derived";
+  evidence_confidence: number;
+  match_score: number;
+  provenance: EvidenceLocation[];
+  uncertainty: string[];
+  contradicts: string[];
+  selectable: boolean;
+  review_required: boolean;
+  derivation?: { id: string; operation: string; input_ids: string[]; depth: number; as_of_date?: string | null };
+}
+
+export interface FillPlanTarget {
+  field: TemplateField;
+  selected_candidate_id?: string | null;
+  candidates: MappingCandidate[];
+  issues: MappingIssue[];
+  state: "proposed" | "unresolved" | "not_applicable";
+}
+
+export interface FillPlanSummary {
+  id: string;
+  case_key: string;
+  template_version_id: string;
+  template_name: string;
+  target_artifact_id: string;
+  target_kind: "pdf" | "xlsx";
+  evidence_bundle_id: string;
+  evidence_bundle_sha256: string;
+  current_revision: number;
+  issue_count: number;
+  blocker_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FillPlan extends FillPlanSummary {
+  revision_id: string;
+  mapper_version: string;
+  payload_sha256: string;
+  payload: {
+    mapper_version: string;
+    template_schema: TemplateSchema;
+    targets: FillPlanTarget[];
+    repeating_groups: Array<{ id: string; label: string; capacity: number; entity_ids: string[]; assigned_entity_ids: string[]; overflow_entity_ids: string[] }>;
+    derivations: Array<Record<string, unknown>>;
+    issues: MappingIssue[];
+    summary: { target_count: number; proposed_count: number; unresolved_count: number; issue_count: number; blocker_count: number };
+    evidence_bundle: { id: string; case_key: string; snapshot_ids: string[]; sha256: string };
+  };
+}

@@ -194,6 +194,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fill-plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Fill Plans */
+        get: operations["list_fill_plans_api_v1_fill_plans_get"];
+        put?: never;
+        /** Post Fill Plan */
+        post: operations["post_fill_plan_api_v1_fill_plans_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fill-plans/{fill_plan_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Fill Plan */
+        get: operations["get_fill_plan_api_v1_fill_plans__fill_plan_id__get"];
+        /** Put Fill Plan */
+        put: operations["put_fill_plan_api_v1_fill_plans__fill_plan_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -231,6 +267,27 @@ export interface components {
         Body_upload_evidence_source_api_v1_evidence_sources_post: {
             /** File */
             file: string;
+        };
+        /** DerivationSpec */
+        DerivationSpec: {
+            /** Id */
+            id: string;
+            /** Target Field Id */
+            target_field_id: string;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "concat" | "sum" | "subtract" | "multiply" | "divide" | "date_diff_years";
+            /** Input Ids */
+            input_ids: string[];
+            /**
+             * Separator
+             * @default
+             */
+            separator: string;
+            /** As Of Date */
+            as_of_date?: string | null;
         };
         /** DraftResponse */
         DraftResponse: {
@@ -418,6 +475,106 @@ export interface components {
             run_id: string;
             /** Snapshot Id */
             snapshot_id?: string | null;
+        };
+        /** FillPlanCreate */
+        FillPlanCreate: {
+            /** Case Key */
+            case_key: string;
+            /** Template Version Id */
+            template_version_id: string;
+            /** Evidence Snapshot Ids */
+            evidence_snapshot_ids?: string[] | null;
+        };
+        /** FillPlanResponse */
+        FillPlanResponse: {
+            /** Id */
+            id: string;
+            /** Case Key */
+            case_key: string;
+            /** Template Version Id */
+            template_version_id: string;
+            /** Template Name */
+            template_name: string;
+            /** Target Artifact Id */
+            target_artifact_id: string;
+            /** Target Kind */
+            target_kind: string;
+            /** Evidence Bundle Id */
+            evidence_bundle_id: string;
+            /** Evidence Bundle Sha256 */
+            evidence_bundle_sha256: string;
+            /** Current Revision */
+            current_revision: number;
+            /** Issue Count */
+            issue_count: number;
+            /** Blocker Count */
+            blocker_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Revision Id */
+            revision_id: string;
+            /** Mapper Version */
+            mapper_version: string;
+            /** Payload Sha256 */
+            payload_sha256: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+        };
+        /** FillPlanSummary */
+        FillPlanSummary: {
+            /** Id */
+            id: string;
+            /** Case Key */
+            case_key: string;
+            /** Template Version Id */
+            template_version_id: string;
+            /** Template Name */
+            template_name: string;
+            /** Target Artifact Id */
+            target_artifact_id: string;
+            /** Target Kind */
+            target_kind: string;
+            /** Evidence Bundle Id */
+            evidence_bundle_id: string;
+            /** Evidence Bundle Sha256 */
+            evidence_bundle_sha256: string;
+            /** Current Revision */
+            current_revision: number;
+            /** Issue Count */
+            issue_count: number;
+            /** Blocker Count */
+            blocker_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** FillPlanUpdate */
+        FillPlanUpdate: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Selected Candidates */
+            selected_candidates?: {
+                [key: string]: string | null;
+            };
+            /** Derivations */
+            derivations?: components["schemas"]["DerivationSpec"][];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1078,6 +1235,136 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_fill_plans_api_v1_fill_plans_get: {
+        parameters: {
+            query?: {
+                case_key?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FillPlanSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_fill_plan_api_v1_fill_plans_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FillPlanCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FillPlanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fill_plan_api_v1_fill_plans__fill_plan_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fill_plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FillPlanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_fill_plan_api_v1_fill_plans__fill_plan_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fill_plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FillPlanUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FillPlanResponse"];
                 };
             };
             /** @description Validation Error */

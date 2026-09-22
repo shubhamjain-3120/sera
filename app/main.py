@@ -16,7 +16,10 @@ from app.models import (
     Artifact,
     ArtifactKind,
     ArtifactPurpose,
+    EvidenceBundle,
     EvidenceSnapshot,
+    FillPlan,
+    FillPlanRevision,
     ProcessingRun,
     TemplateDraft,
     TemplateVersion,
@@ -27,15 +30,21 @@ from app.schemas import (
     DraftUpdate,
     EvidenceSnapshotResponse,
     EvidenceSourceResponse,
+    FillPlanCreate,
+    FillPlanResponse,
+    FillPlanSummary,
+    FillPlanUpdate,
     PublishRequest,
     RunResponse,
     VersionResponse,
 )
 from app.services import (
     RevisionConflict,
+    create_fill_plan,
     ingest_evidence,
     inspect_artifact,
     publish_draft,
+    revise_fill_plan,
     update_draft,
 )
 from app.storage import get_storage
@@ -93,7 +102,7 @@ def _run_response(run: ProcessingRun) -> RunResponse:
 
 @app.get("/api/v1/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "phase": "evidence-inspector"}
+    return {"status": "ok", "phase": "fill-plan-inspector"}
 
 
 @app.post("/api/v1/artifacts", response_model=ArtifactResponse, status_code=201)
@@ -368,3 +377,91 @@ def publish(draft_id: str, request: PublishRequest, db: Db) -> TemplateVersion:
 @app.get("/api/v1/templates/{draft_id}/versions", response_model=list[VersionResponse])
 def versions(draft_id: str, db: Db) -> list[TemplateVersion]:
     return list(db.scalars(select(TemplateVersion).where(TemplateVersion.draft_id == draft_id).order_by(TemplateVersion.version.desc())).all())
+
+
+def _fill_plan_response(db: Session, fill_plan: FillPlan) -> FillPlanResponse:
+    version = db.get(TemplateVersion, fill_plan.template_version_id)
+    bundle = db.get(EvidenceBundle, fill_plan.evidence_bundle_id)
+    revision = db.scalar(
+        select(FillPlanRevision).where(
+            FillPlanRevision.fill_plan_id == fill_plan.id,
+            FillPlanRevision.revision == fill_plan.current_revision,
+        )
+    )
+    if version is None or bundle is None or revision is None:
+        raise HTTPException(500, "Fill Plan references are incomplete")
+    draft = db.get(TemplateDraft, version.draft_id)
+    artifact = db.get(Artifact, draft.artifact_id) if draft else None
+    if draft is None or artifact is None:
+        raise HTTPException(500, "Fill Plan target is incomplete")
+    summary = revision.payload.get("summary", {})
+    return FillPlanResponse(
+        id=fill_plan.id,
+        case_key=fill_plan.case_key,
+        template_version_id=version.id,
+        template_name=version.name,
+        target_artifact_id=artifact.id,
+        target_kind=artifact.kind.value,
+        evidence_bundle_id=bundle.id,
+        evidence_bundle_sha256=bundle.bundle_sha256,
+        current_revision=fill_plan.current_revision,
+        issue_count=int(summary.get("issue_count", 0)),
+        blocker_count=int(summary.get("blocker_count", 0)),
+        created_at=fill_plan.created_at,
+        updated_at=fill_plan.updated_at,
+        revision_id=revision.id,
+        mapper_version=revision.mapper_version,
+        payload_sha256=revision.payload_sha256,
+        payload=revision.payload,
+    )
+
+
+@app.post("/api/v1/fill-plans", response_model=FillPlanResponse, status_code=201)
+def post_fill_plan(request: FillPlanCreate, db: Db) -> FillPlanResponse:
+    version = db.get(TemplateVersion, request.template_version_id)
+    if version is None:
+        raise HTTPException(404, "Published template version not found")
+    try:
+        fill_plan = create_fill_plan(
+            db, request.case_key, version, request.evidence_snapshot_ids
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _fill_plan_response(db, fill_plan)
+
+
+@app.get("/api/v1/fill-plans", response_model=list[FillPlanSummary])
+def list_fill_plans(db: Db, case_key: str | None = None) -> list[FillPlanSummary]:
+    query = select(FillPlan)
+    if case_key is not None:
+        query = query.where(FillPlan.case_key == case_key)
+    plans = db.scalars(query.order_by(FillPlan.updated_at.desc())).all()
+    return [FillPlanSummary(**_fill_plan_response(db, plan).model_dump()) for plan in plans]
+
+
+@app.get("/api/v1/fill-plans/{fill_plan_id}", response_model=FillPlanResponse)
+def get_fill_plan(fill_plan_id: str, db: Db) -> FillPlanResponse:
+    fill_plan = db.get(FillPlan, fill_plan_id)
+    if fill_plan is None:
+        raise HTTPException(404, "Fill Plan not found")
+    return _fill_plan_response(db, fill_plan)
+
+
+@app.put("/api/v1/fill-plans/{fill_plan_id}", response_model=FillPlanResponse)
+def put_fill_plan(fill_plan_id: str, update: FillPlanUpdate, db: Db) -> FillPlanResponse:
+    fill_plan = db.get(FillPlan, fill_plan_id)
+    if fill_plan is None:
+        raise HTTPException(404, "Fill Plan not found")
+    try:
+        revise_fill_plan(
+            db,
+            fill_plan,
+            update.expected_revision,
+            update.selected_candidates,
+            [item.model_dump(mode="json") for item in update.derivations],
+        )
+    except RevisionConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _fill_plan_response(db, fill_plan)

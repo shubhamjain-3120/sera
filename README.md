@@ -3,7 +3,7 @@
 The canonical phased roadmap and acceptance gates are documented in
 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md). Consult it before starting each phase.
 
-Phase 1 implements target ingestion and the Template Inspector. Phase 2 adds isolated source ingestion and an Evidence Inspector for PDF, images, XLSX, and raw text. Originals remain immutable and content-addressed. Target mapping, review-to-target workflows, and final output generation are intentionally not present yet.
+Phase 1 implements target ingestion and the Template Inspector. Phase 2 adds isolated source ingestion and an Evidence Inspector. Phase 3 adds grounded mapping and the Fill Plan Inspector. Originals remain immutable and content-addressed. Independent verification, human approval, and final output generation intentionally remain for later phases.
 
 ## What is implemented
 
@@ -23,6 +23,11 @@ Inherited page widgets are reconciled through their terminal AcroForm parent. Wi
 - Immutable, content-hashed evidence snapshots with facts, entity roles, exact provenance, parser/extractor versions, date/unit context, confidence, uncertainty, duplicates, contradictions, and unreadable regions.
 - Canonical navigation for PDF and image rectangles, PDF rotation transforms, workbook sheet/cell ranges, and text character spans. Accepted facts always retain at least one exact source locator.
 - Untrusted-content controls: quoted email, signatures, and document-authored directions are not accepted as applicant facts or application instructions. Filled/reference outputs are rejected by the source endpoint.
+- Frozen, case-scoped evidence bundles shared across target outputs, with one current immutable snapshot per source and explicit snapshot selection support.
+- Immutable Fill Plan revisions with optimistic concurrency, published template-version pinning, native target locations, exact evidence provenance/confidence, selected proposals, alternatives, and unresolved issues.
+- Conservative semantic/type/entity mapping with PostgreSQL full-text candidate retrieval, deterministic SQLite test behavior, exact choice matching, and auditable boolean/date/number normalization.
+- Grounded restricted derivations with exposed inputs and as-of dates, maximum depth two, cycle rejection, and mandatory later human review. Model-generated code is never executed.
+- Repeating-record accounting that retains every entity and creates a blocker when target capacity is exceeded. Prefilled target values require later disposition and are never treated as current-case evidence.
 
 The two supplied ZIPs and any extracted customer documents are ignored by Git. Filled reference outputs are not used by the application or test evidence.
 
@@ -49,6 +54,8 @@ Open [http://localhost:5173](http://localhost:5173). API documentation is at [ht
 
 Open `/evidence` for Phase 2 source ingestion. Choose the representative case before uploading so evidence stays isolated.
 
+Open `/fill-plans` for Phase 3 mapping. Publish a target template first, choose the matching case, and create a Fill Plan against the latest published version and frozen case evidence.
+
 Evidence ingestion requires `REDUCTO_API_KEY`. The API returns a clear `503` instead of producing lower-quality native OCR evidence when credentials are missing.
 
 For the intended service stack, install Docker Desktop or another Compose-compatible runtime and run `docker compose up --build`. This uses PostgreSQL, Redis, MinIO, the API, and a Celery worker.
@@ -59,6 +66,7 @@ For the intended service stack, install Docker Desktop or another Compose-compat
 uv run ruff check app tests migrations
 uv run pytest -q
 uv run python -m scripts.evaluate_phase2 "/path/to/input and filled form 1.zip" "/path/to/input and filled form 2.zip"
+uv run python -m scripts.evaluate_phase3
 cd web
 pnpm build
 pnpm test
@@ -66,6 +74,17 @@ pnpm test:e2e
 ```
 
 Regenerate TypeScript OpenAPI contracts after an API change with `cd web && pnpm contracts`.
+
+## Manual Phase 3 acceptance walkthrough
+
+1. Complete the Phase 1 and 2 walkthroughs for a case and publish each target template version. Never upload a filled reference output as evidence.
+2. Open `/fill-plans`, select the case, and create a Fill Plan for a published target. Confirm the header shows a frozen evidence hash and the center panel shows the unchanged native PDF widgets or XLSX cells.
+3. Select directly matched and normalized proposals. Confirm the right panel shows the selected value, unchanged evidence confidence, match score, resolution, and exact source location. Open the immutable source link and compare it with the proposal.
+4. Inspect an ambiguous or contradictory field. Confirm different values remain alternatives, the target stays unresolved, and the application does not silently select one.
+5. Inspect a required field with no grounded fact. Confirm it is unresolved with a blocker. Inspect signatures, actions, and non-writable targets and confirm they are explicitly excluded.
+6. Use synthetic tests to exercise depth-one/two derivations, cycles, depth-three derivations, and repeating-record overflow. Confirm invalid derivations and overflow are blockers and all overflow entity IDs remain recorded.
+7. Create Fill Plans for both Rivington outputs without changing case evidence. Confirm both plans have the same evidence-bundle hash.
+8. Run the automated commands above, then run `uv run python -m scripts.evaluate_phase3 --require-plans` against the populated local database. Stop for Phase 3 approval; there is no independent verifier, human approval workflow, target write, or regenerated output in this phase.
 
 ## Manual Phase 2 acceptance walkthrough
 
@@ -85,10 +104,10 @@ The evaluator read only the authorized original source members directly from the
 | Case/source | Parse blocks | Facts | Accepted | Review | Unreadable regions | Result |
 |---|---:|---:|---:|---:|---:|---|
 | Case 1 scanned license (`California's.pdf`) | 37 | 7 | 4 | 3 | 12 | Explicit no-given-name preserved with exact region; local OCR did not recover the license number and did not guess it |
-| Case 1 email PDF | 172 | 36 | 17 | 19 | 0 | Applicant/vehicle facts extracted; email routing and contradictory values remain reviewable |
+| Case 1 email PDF | 172 | 36 | 19 | 17 | Applicant/vehicle facts extracted; email routing and contradictory values remain reviewable |
 | Case 2 Mohammad PDF | 77 | 9 | 9 | 0 | 0 | Source facts extracted with word-derived page rectangles |
 
-Individual observed failures are retained rather than hidden: local OCR did not recover the scanned license number, three scanned-license candidates require review, 12 scan regions were unreadable/low-confidence, and 19 email facts require review due to routing metadata, contradictions, or untrusted direction-like content. Live Reducto output can improve scan coverage while the recorded response fixture keeps CI deterministic.
+Individual observed failures are retained rather than hidden: local OCR did not recover the scanned license number, three scanned-license candidates require review, 12 scan regions were unreadable/low-confidence, and 17 email facts require review due to routing metadata, contradictions, or untrusted direction-like content. Live Reducto output can improve scan coverage while the recorded response fixture keeps CI deterministic.
 
 ## Manual Phase 1 acceptance walkthrough
 

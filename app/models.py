@@ -118,3 +118,56 @@ class EvidenceSnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     artifact: Mapped[Artifact] = relationship()
     run: Mapped[ProcessingRun] = relationship()
+
+
+class EvidenceBundle(Base):
+    """A frozen, case-scoped set of immutable evidence snapshots."""
+
+    __tablename__ = "evidence_bundles"
+    __table_args__ = (
+        UniqueConstraint("case_key", "bundle_sha256", name="uq_evidence_bundle_hash"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    case_key: Mapped[str] = mapped_column(String(64), index=True)
+    snapshot_ids: Mapped[list[str]] = mapped_column(JSON)
+    bundle_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class FillPlan(Base):
+    __tablename__ = "fill_plans"
+    __table_args__ = (
+        UniqueConstraint(
+            "template_version_id", "evidence_bundle_id", name="uq_fill_plan_inputs"
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    case_key: Mapped[str] = mapped_column(String(64), index=True)
+    template_version_id: Mapped[str] = mapped_column(
+        ForeignKey("template_versions.id"), index=True
+    )
+    evidence_bundle_id: Mapped[str] = mapped_column(
+        ForeignKey("evidence_bundles.id"), index=True
+    )
+    current_revision: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    template_version: Mapped[TemplateVersion] = relationship()
+    evidence_bundle: Mapped[EvidenceBundle] = relationship()
+
+
+class FillPlanRevision(Base):
+    """Immutable mapping result. A changed proposal creates a new revision."""
+
+    __tablename__ = "fill_plan_revisions"
+    __table_args__ = (
+        UniqueConstraint("fill_plan_id", "revision", name="uq_fill_plan_revision"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    fill_plan_id: Mapped[str] = mapped_column(ForeignKey("fill_plans.id"), index=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    mapper_version: Mapped[str] = mapped_column(String(64))
+    payload_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    fill_plan: Mapped[FillPlan] = relationship()

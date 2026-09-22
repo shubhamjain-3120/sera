@@ -1,4 +1,4 @@
-import type { Artifact, Draft, EvidenceSnapshot, EvidenceSource, Run, TemplateSchema } from "./types";
+import type { Artifact, Draft, EvidenceSnapshot, EvidenceSource, FillPlan, FillPlanSummary, Run, TemplateSchema, TemplateVersion } from "./types";
 
 export const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -39,6 +39,15 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ expected_revision: revision }),
+    }),
+  versions: (draftId: string) => request<TemplateVersion[]>(`/api/v1/templates/${draftId}/versions`),
+  listFillPlans: () => request<FillPlanSummary[]>("/api/v1/fill-plans"),
+  fillPlan: (id: string) => request<FillPlan>(`/api/v1/fill-plans/${id}`),
+  createFillPlan: (caseKey: string, templateVersionId: string) =>
+    request<FillPlan>("/api/v1/fill-plans", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ case_key: caseKey, template_version_id: templateVersionId }),
     }),
   grid: (artifactId: string, sheet: string, row = 1, column = 1) => {
     const minRow = Math.max(1, row - 8);

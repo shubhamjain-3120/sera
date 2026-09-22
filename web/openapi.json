@@ -627,6 +627,178 @@
           }
         }
       }
+    },
+    "/api/v1/fill-plans": {
+      "post": {
+        "summary": "Post Fill Plan",
+        "operationId": "post_fill_plan_api_v1_fill_plans_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FillPlanCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FillPlanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List Fill Plans",
+        "operationId": "list_fill_plans_api_v1_fill_plans_get",
+        "parameters": [
+          {
+            "name": "case_key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Case Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FillPlanSummary"
+                  },
+                  "title": "Response List Fill Plans Api V1 Fill Plans Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/fill-plans/{fill_plan_id}": {
+      "get": {
+        "summary": "Get Fill Plan",
+        "operationId": "get_fill_plan_api_v1_fill_plans__fill_plan_id__get",
+        "parameters": [
+          {
+            "name": "fill_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fill Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FillPlanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Put Fill Plan",
+        "operationId": "put_fill_plan_api_v1_fill_plans__fill_plan_id__put",
+        "parameters": [
+          {
+            "name": "fill_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fill Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FillPlanUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FillPlanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -712,6 +884,62 @@
           "file"
         ],
         "title": "Body_upload_evidence_source_api_v1_evidence_sources_post"
+      },
+      "DerivationSpec": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "target_field_id": {
+            "type": "string",
+            "title": "Target Field Id"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "concat",
+              "sum",
+              "subtract",
+              "multiply",
+              "divide",
+              "date_diff_years"
+            ],
+            "title": "Operation"
+          },
+          "input_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Input Ids"
+          },
+          "separator": {
+            "type": "string",
+            "title": "Separator",
+            "default": " "
+          },
+          "as_of_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "target_field_id",
+          "operation",
+          "input_ids"
+        ],
+        "title": "DerivationSpec"
       },
       "DraftResponse": {
         "properties": {
@@ -1284,6 +1512,246 @@
           "run_id"
         ],
         "title": "EvidenceSourceResponse"
+      },
+      "FillPlanCreate": {
+        "properties": {
+          "case_key": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+            "title": "Case Key"
+          },
+          "template_version_id": {
+            "type": "string",
+            "title": "Template Version Id"
+          },
+          "evidence_snapshot_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Snapshot Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "case_key",
+          "template_version_id"
+        ],
+        "title": "FillPlanCreate"
+      },
+      "FillPlanResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "case_key": {
+            "type": "string",
+            "title": "Case Key"
+          },
+          "template_version_id": {
+            "type": "string",
+            "title": "Template Version Id"
+          },
+          "template_name": {
+            "type": "string",
+            "title": "Template Name"
+          },
+          "target_artifact_id": {
+            "type": "string",
+            "title": "Target Artifact Id"
+          },
+          "target_kind": {
+            "type": "string",
+            "title": "Target Kind"
+          },
+          "evidence_bundle_id": {
+            "type": "string",
+            "title": "Evidence Bundle Id"
+          },
+          "evidence_bundle_sha256": {
+            "type": "string",
+            "title": "Evidence Bundle Sha256"
+          },
+          "current_revision": {
+            "type": "integer",
+            "title": "Current Revision"
+          },
+          "issue_count": {
+            "type": "integer",
+            "title": "Issue Count"
+          },
+          "blocker_count": {
+            "type": "integer",
+            "title": "Blocker Count"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "revision_id": {
+            "type": "string",
+            "title": "Revision Id"
+          },
+          "mapper_version": {
+            "type": "string",
+            "title": "Mapper Version"
+          },
+          "payload_sha256": {
+            "type": "string",
+            "title": "Payload Sha256"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "case_key",
+          "template_version_id",
+          "template_name",
+          "target_artifact_id",
+          "target_kind",
+          "evidence_bundle_id",
+          "evidence_bundle_sha256",
+          "current_revision",
+          "issue_count",
+          "blocker_count",
+          "created_at",
+          "updated_at",
+          "revision_id",
+          "mapper_version",
+          "payload_sha256",
+          "payload"
+        ],
+        "title": "FillPlanResponse"
+      },
+      "FillPlanSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "case_key": {
+            "type": "string",
+            "title": "Case Key"
+          },
+          "template_version_id": {
+            "type": "string",
+            "title": "Template Version Id"
+          },
+          "template_name": {
+            "type": "string",
+            "title": "Template Name"
+          },
+          "target_artifact_id": {
+            "type": "string",
+            "title": "Target Artifact Id"
+          },
+          "target_kind": {
+            "type": "string",
+            "title": "Target Kind"
+          },
+          "evidence_bundle_id": {
+            "type": "string",
+            "title": "Evidence Bundle Id"
+          },
+          "evidence_bundle_sha256": {
+            "type": "string",
+            "title": "Evidence Bundle Sha256"
+          },
+          "current_revision": {
+            "type": "integer",
+            "title": "Current Revision"
+          },
+          "issue_count": {
+            "type": "integer",
+            "title": "Issue Count"
+          },
+          "blocker_count": {
+            "type": "integer",
+            "title": "Blocker Count"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "case_key",
+          "template_version_id",
+          "template_name",
+          "target_artifact_id",
+          "target_kind",
+          "evidence_bundle_id",
+          "evidence_bundle_sha256",
+          "current_revision",
+          "issue_count",
+          "blocker_count",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "FillPlanSummary"
+      },
+      "FillPlanUpdate": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "title": "Expected Revision"
+          },
+          "selected_candidates": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Selected Candidates"
+          },
+          "derivations": {
+            "items": {
+              "$ref": "#/components/schemas/DerivationSpec"
+            },
+            "type": "array",
+            "title": "Derivations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_revision"
+        ],
+        "title": "FillPlanUpdate"
       },
       "HTTPValidationError": {
         "properties": {

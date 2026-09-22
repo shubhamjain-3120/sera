@@ -214,3 +214,47 @@ class VersionResponse(BaseModel):
 
 class PublishRequest(BaseModel):
     expected_revision: int
+
+
+class FillPlanCreate(BaseModel):
+    case_key: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+    template_version_id: str
+    evidence_snapshot_ids: list[str] | None = None
+
+
+class DerivationSpec(BaseModel):
+    id: str
+    target_field_id: str
+    operation: Literal["concat", "sum", "subtract", "multiply", "divide", "date_diff_years"]
+    input_ids: list[str] = Field(min_length=1)
+    separator: str = " "
+    as_of_date: str | None = None
+
+
+class FillPlanUpdate(BaseModel):
+    expected_revision: int
+    selected_candidates: dict[str, str | None] = Field(default_factory=dict)
+    derivations: list[DerivationSpec] = Field(default_factory=list)
+
+
+class FillPlanSummary(BaseModel):
+    id: str
+    case_key: str
+    template_version_id: str
+    template_name: str
+    target_artifact_id: str
+    target_kind: str
+    evidence_bundle_id: str
+    evidence_bundle_sha256: str
+    current_revision: int
+    issue_count: int
+    blocker_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class FillPlanResponse(FillPlanSummary):
+    revision_id: str
+    mapper_version: str
+    payload_sha256: str
+    payload: dict[str, Any]

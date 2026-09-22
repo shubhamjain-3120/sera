@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, Archive, Check, ChevronLeft, FileImage, FileSpreadsheet, FileText, LoaderCircle, Lock, Plus, Save, Search, ShieldCheck, Upload, X } from "lucide-react";
+import { AlertTriangle, Archive, Check, ChevronLeft, FileImage, FileSpreadsheet, FileText, ListChecks, LoaderCircle, Lock, Plus, Save, Search, ShieldCheck, Upload, X } from "lucide-react";
 import { API, api, type GridCell } from "./api";
-import type { Artifact, Draft, EvidenceFact, EvidenceLocation, EvidenceSource, FieldType, Location, TemplateField } from "./types";
+import type { Artifact, Draft, EvidenceFact, EvidenceLocation, EvidenceSource, FieldType, FillPlanTarget, Location, MappingCandidate, TemplateField } from "./types";
 
 function App() {
-  return <Routes><Route path="/" element={<Library />} /><Route path="/templates/:artifactId/:draftId" element={<Inspector />} /><Route path="/evidence" element={<EvidenceLibrary />} /><Route path="/evidence/process/:artifactId" element={<EvidenceRun />} /><Route path="/evidence/:artifactId/:snapshotId" element={<EvidenceInspector />} /></Routes>;
+  return <Routes><Route path="/" element={<Library />} /><Route path="/templates/:artifactId/:draftId" element={<Inspector />} /><Route path="/evidence" element={<EvidenceLibrary />} /><Route path="/evidence/process/:artifactId" element={<EvidenceRun />} /><Route path="/evidence/:artifactId/:snapshotId" element={<EvidenceInspector />} /><Route path="/fill-plans" element={<FillPlanLibrary />} /><Route path="/fill-plans/:fillPlanId" element={<FillPlanInspector />} /></Routes>;
 }
 
 function Brand() {
@@ -14,7 +14,7 @@ function Brand() {
 }
 
 function WorkspaceNav() {
-  return <nav className="workspace-nav"><Link to="/">Templates</Link><Link to="/evidence">Evidence</Link></nav>;
+  return <nav className="workspace-nav"><Link to="/">Templates</Link><Link to="/evidence">Evidence</Link><Link to="/fill-plans">Fill Plans</Link></nav>;
 }
 
 function Library() {
@@ -124,6 +124,70 @@ function EvidencePreview({ artifactId, fact, blocks }: { artifactId: string; fac
   const imageUrl = location.kind === "pdf_rect" ? `${API}/api/v1/artifacts/${artifactId}/pages/${location.page ?? 1}.png?scale=1.5` : `${API}/api/v1/artifacts/${artifactId}/content`;
   const overlay = { id: fact!.id, label: fact!.label, field_type: "text" as const, writable: false, options: [], location: { kind: "pdf_rect" as const, page: location.page, rect: location.rect, rotation: location.rotation, page_width: location.page_width, page_height: location.page_height, coordinate_system: location.coordinate_system } };
   return <div className="pdf-wrap"><div className="page-nav"><span>{location.kind === "image_rect" ? "Original image" : `Page ${location.page}`}</span></div><div className="paper"><img alt="Original evidence source" src={imageUrl} /><button aria-label={fact!.label} className="pdf-field active" style={pdfRectStyle(overlay.location)} /></div></div>;
+}
+
+function FillPlanLibrary() {
+  const navigate = useNavigate();
+  const client = useQueryClient();
+  const [caseKey, setCaseKey] = useState("case-1");
+  const plans = useQuery({ queryKey: ["fill-plans"], queryFn: api.listFillPlans });
+  const templates = useQuery({ queryKey: ["artifacts"], queryFn: api.listArtifacts });
+  const create = useMutation({
+    mutationFn: async (artifact: Artifact) => {
+      const versions = await api.versions(artifact.draft_id);
+      if (!versions.length) throw new Error("Publish this template before creating a Fill Plan");
+      return api.createFillPlan(caseKey, versions[0].id);
+    },
+    onSuccess: (plan) => { client.invalidateQueries({ queryKey: ["fill-plans"] }); navigate(`/fill-plans/${plan.id}`); },
+  });
+  return <div className="app-shell">
+    <header><Brand /><WorkspaceNav /><div className="phase-badge"><span /> Phase 3 · Fill Plan inspector</div></header>
+    <main className="library fill-plan-library">
+      <section className="hero fill-plan-hero"><p className="eyebrow">Grounded mapping</p><h1>Map evidence.<br /><em>Expose uncertainty.</em></h1><p>Create a revisioned Fill Plan against a published template and a frozen case-evidence bundle. Nothing is written to the original target.</p><div className="upload-row"><select aria-label="Mapping case" value={caseKey} onChange={(event) => setCaseKey(event.target.value)}><option value="case-1">Representative case 1</option><option value="case-2">Representative case 2</option><option value="synthetic">Synthetic test case</option></select></div>{create.error && <div className="error-banner">{create.error.message}</div>}</section>
+      <section className="recent"><div className="section-heading"><div><span className="eyebrow">Published targets</span><h2>Start a Fill Plan</h2></div><span>{templates.data?.length ?? 0} templates</span></div><div className="artifact-grid">{templates.data?.map((artifact) => <button className="artifact-card mapping-create" key={artifact.id} onClick={() => create.mutate(artifact)} disabled={create.isPending}><div className={`file-icon ${artifact.kind}`}>{artifact.kind === "pdf" ? <FileText /> : <FileSpreadsheet />}</div><div><h3>{artifact.filename}</h3><p>Use latest published version · {caseKey}</p></div><Plus size={16} /></button>)}</div></section>
+      <section className="recent"><div className="section-heading"><div><span className="eyebrow">Frozen proposals</span><h2>Fill Plans</h2></div><span>{plans.data?.length ?? 0} total</span></div>{plans.isLoading ? <div className="empty"><LoaderCircle className="spin" /> Loading Fill Plans</div> : plans.data?.length ? <div className="artifact-grid">{plans.data.map((plan) => <Link className="artifact-card" to={`/fill-plans/${plan.id}`} key={plan.id}><div className="file-icon mapping"><ListChecks /></div><div><h3>{plan.template_name}</h3><p>{plan.case_key} · Revision {plan.current_revision} · {plan.issue_count} issues</p></div>{plan.blocker_count ? <span className="blocker-count">{plan.blocker_count} blocked</span> : <span className="hash">ready</span>}</Link>)}</div> : <div className="empty">No Fill Plans yet. Publish a template and choose a case above.</div>}</section>
+    </main>
+  </div>;
+}
+
+function FillPlanInspector() {
+  const { fillPlanId = "" } = useParams();
+  const plan = useQuery({ queryKey: ["fill-plan", fillPlanId], queryFn: () => api.fillPlan(fillPlanId) });
+  if (!plan.data) return <div className="center"><LoaderCircle className="spin" /> Loading Fill Plan…</div>;
+  return <FillPlanView plan={plan.data} />;
+}
+
+function FillPlanView({ plan }: { plan: Awaited<ReturnType<typeof api.fillPlan>> }) {
+  const [selectedId, setSelectedId] = useState(plan.payload.targets[0]?.field.id ?? "");
+  const [filter, setFilter] = useState("");
+  const target = plan.payload.targets.find((item) => item.field.id === selectedId);
+  const fields = plan.payload.targets.map((item) => item.field);
+  const visible = plan.payload.targets.filter((item) => `${item.field.label} ${item.field.semantic_type ?? ""}`.toLowerCase().includes(filter.toLowerCase()));
+  const inspection = plan.payload.template_schema.inspection as { format?: "pdf" | "xlsx"; page_count?: number; sheets?: Array<{ name: string; state: string; protected: boolean }> };
+  return <div className="inspector mapping-inspector">
+    <header><Brand /><div className="crumb"><ChevronLeft size={16} /><Link to="/fill-plans">Fill Plans</Link><span>/</span><strong>{plan.template_name}</strong></div><div className="snapshot-badge"><Lock size={13} /> Evidence frozen · {plan.evidence_bundle_sha256.slice(0, 10)}</div></header>
+    <div className="workbench mapping-workbench">
+      <aside className="field-list"><div className="panel-title"><div><p className="eyebrow">Target mappings</p><h2>{plan.payload.summary.proposed_count} proposed</h2></div></div><label className="search"><Search size={15} /><input placeholder="Find a target field" value={filter} onChange={(event) => setFilter(event.target.value)} /></label><div className="evidence-summary"><span>{plan.payload.summary.unresolved_count} unresolved</span><span>{plan.blocker_count} blockers</span></div><div className="field-scroll">{visible.map((item, index) => <button key={item.field.id} className={`field-row mapping-row ${item.field.id === selectedId ? "active" : ""}`} onClick={() => setSelectedId(item.field.id)}><span className="field-number">{String(index + 1).padStart(2, "0")}</span><span><strong>{item.field.label}</strong><small>{mappingValue(item)}</small></span><i className={`mapping-state ${item.state}`} /></button>)}</div></aside>
+      <main className="preview-panel"><div className="preview-toolbar"><div><strong>Authoritative target</strong><span> · original, read-only</span></div><div className="legend"><i className="selected" /> Selected target</div></div>{plan.payload.issues.some((issue) => issue.severity === "blocker") && <div className="warning"><AlertTriangle size={15} /> This plan contains blockers and cannot proceed to later finalization.</div>}{inspection.format === "pdf" ? <PdfPreview artifactId={plan.target_artifact_id} fields={fields} selected={selectedId} onSelect={setSelectedId} pages={inspection.page_count ?? 1} /> : <WorkbookPreview artifactId={plan.target_artifact_id} fields={fields} selected={selectedId} onSelect={setSelectedId} sheets={inspection.sheets ?? []} />}</main>
+      <aside className="properties">{target ? <MappingProperties target={target} /> : <div className="empty-property"><Archive /><p>Select a target to inspect its proposals.</p></div>}</aside>
+    </div>
+  </div>;
+}
+
+function mappingValue(target: FillPlanTarget) {
+  const selected = target.candidates.find((candidate) => candidate.id === target.selected_candidate_id);
+  if (selected) return selected.value === null ? "Explicitly absent" : String(selected.value);
+  return target.state === "not_applicable" ? "Not writable" : "Unresolved";
+}
+
+function MappingProperties({ target }: { target: FillPlanTarget }) {
+  const selected = target.candidates.find((candidate) => candidate.id === target.selected_candidate_id);
+  return <><div className="panel-title"><div><p className="eyebrow">Fill proposal</p><h2>{selected ? "Proposed value" : target.state === "not_applicable" ? "Excluded target" : "Needs review"}</h2></div></div><div className="mapping-properties"><div className="target-identity"><span>Target</span><strong>{target.field.label}</strong><small>{target.field.semantic_type ?? "No semantic type"} · {target.field.field_type}</small></div>{selected && <CandidateCard candidate={selected} selected />}{target.issues.map((issue) => <div className={`mapping-issue ${issue.severity}`} key={issue.id}><AlertTriangle size={13} /><span><strong>{issue.code.replaceAll("_", " ")}</strong>{issue.message}</span></div>)}{target.candidates.length > 0 && <><p className="eyebrow alternatives-title">All grounded candidates</p>{target.candidates.map((candidate) => <CandidateCard key={candidate.id} candidate={candidate} selected={candidate.id === target.selected_candidate_id} />)}</>} {!target.candidates.length && target.state !== "not_applicable" && <p className="empty-candidates">No source fact passed semantic, type, and entity filtering. The mapper did not guess.</p>}</div></>;
+}
+
+function CandidateCard({ candidate, selected }: { candidate: MappingCandidate; selected: boolean }) {
+  const location = candidate.provenance[0];
+  return <div className={`candidate-card ${selected ? "selected" : ""}`}><div className="candidate-heading"><strong>{candidate.value === null ? "Explicitly absent" : String(candidate.value)}</strong><span>{selected ? "selected" : "alternative"}</span></div><p>{candidate.fact_key ?? candidate.derivation?.operation} · {candidate.entity_role ?? "derived"}</p><div className="candidate-metrics"><span>Evidence {Math.round(candidate.evidence_confidence * 100)}%</span><span>Match {Math.round(candidate.match_score * 100)}%</span><span>{candidate.resolution}</span>{candidate.unit && <span>{candidate.unit}</span>}{candidate.date_context && <span>{candidate.date_context}</span>}</div>{location && <div className="location-card"><span>Exact evidence</span><strong>{formatEvidenceLocation(location)}</strong><small>{location.coordinate_system}</small></div>}{candidate.snapshot_id && candidate.source_artifact_id && <Link className="source-link" to={`/evidence/${candidate.source_artifact_id}/${candidate.snapshot_id}`}>Open immutable source evidence →</Link>}{candidate.derivation && <div className="derivation-card"><span>Derivation depth {candidate.derivation.depth}</span><strong>{candidate.derivation.operation}</strong><small>Inputs: {candidate.derivation.input_ids.join(", ")}</small></div>}{candidate.uncertainty.map((item) => <div className="uncertainty" key={item}><AlertTriangle size={13} />{item}</div>)}</div>;
 }
 
 function ArtifactCard({ item }: { item: Artifact }) {

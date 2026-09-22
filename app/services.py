@@ -10,8 +10,20 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.evidence import extract_evidence, native_parse
+from app.evidence.retrieve import candidate_pools
 from app.inspectors import inspect_pdf, inspect_xlsx
-from app.models import EvidenceSnapshot, ProcessingRun, RunStatus, TemplateDraft, TemplateVersion
+from app.mapping import MAPPER_VERSION, apply_revision, build_fill_plan
+from app.models import (
+    Artifact,
+    EvidenceBundle,
+    EvidenceSnapshot,
+    FillPlan,
+    FillPlanRevision,
+    ProcessingRun,
+    RunStatus,
+    TemplateDraft,
+    TemplateVersion,
+)
 from app.parsers.reducto import ReductoParserAdapter
 from app.schemas import TemplateSchema
 from app.storage import ObjectStorage
@@ -206,3 +218,136 @@ def publish_draft(session: Session, draft: TemplateDraft, expected_revision: int
     session.commit()
     session.refresh(version)
     return version
+
+
+def create_fill_plan(
+    session: Session,
+    case_key: str,
+    template_version: TemplateVersion,
+    snapshot_ids: list[str] | None = None,
+) -> FillPlan:
+    if snapshot_ids is None:
+        rows = session.execute(
+            select(EvidenceSnapshot, Artifact)
+            .join(Artifact, EvidenceSnapshot.artifact_id == Artifact.id)
+            .where(Artifact.case_key == case_key)
+            .order_by(EvidenceSnapshot.created_at.desc(), EvidenceSnapshot.id.desc())
+        ).all()
+        # A case bundle contains one current immutable snapshot per source artifact.
+        # Older parser/extractor snapshots remain addressable but are never mixed
+        # into a new Fill Plan implicitly.
+        latest_by_artifact: dict[str, EvidenceSnapshot] = {}
+        for snapshot, artifact in rows:
+            latest_by_artifact.setdefault(artifact.id, snapshot)
+        snapshots = list(latest_by_artifact.values())
+    else:
+        snapshots = list(
+            session.scalars(select(EvidenceSnapshot).where(EvidenceSnapshot.id.in_(snapshot_ids))).all()
+        )
+        if len(snapshots) != len(set(snapshot_ids)):
+            raise ValueError("One or more evidence snapshots were not found")
+        artifacts = list(
+            session.scalars(
+                select(Artifact).where(Artifact.id.in_([snapshot.artifact_id for snapshot in snapshots]))
+            ).all()
+        )
+        if any(artifact.case_key != case_key for artifact in artifacts):
+            raise ValueError("Evidence snapshots must all belong to the requested case")
+    if not snapshots:
+        raise ValueError(f"Case {case_key} has no evidence snapshots")
+    ordered = sorted(snapshots, key=lambda item: item.id)
+    bundle_material = [
+        {"id": snapshot.id, "sha256": snapshot.snapshot_sha256} for snapshot in ordered
+    ]
+    bundle_hash = hashlib.sha256(
+        json.dumps(bundle_material, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    bundle = session.scalar(
+        select(EvidenceBundle).where(
+            EvidenceBundle.case_key == case_key, EvidenceBundle.bundle_sha256 == bundle_hash
+        )
+    )
+    if bundle is None:
+        bundle = EvidenceBundle(
+            case_key=case_key,
+            snapshot_ids=[snapshot.id for snapshot in ordered],
+            bundle_sha256=bundle_hash,
+        )
+        session.add(bundle)
+        session.flush()
+    existing = session.scalar(
+        select(FillPlan).where(
+            FillPlan.template_version_id == template_version.id,
+            FillPlan.evidence_bundle_id == bundle.id,
+        )
+    )
+    if existing:
+        return existing
+    payload = build_fill_plan(
+        template_version.schema,
+        [(snapshot.id, snapshot.snapshot) for snapshot in ordered],
+        candidate_pools(session, ordered, template_version.schema.get("fields", [])),
+    )
+    payload["evidence_bundle"] = {
+        "id": bundle.id,
+        "case_key": case_key,
+        "snapshot_ids": bundle.snapshot_ids,
+        "sha256": bundle.bundle_sha256,
+    }
+    payload["template_version"] = {
+        "id": template_version.id,
+        "version": template_version.version,
+        "schema_sha256": template_version.schema_sha256,
+    }
+    fill_plan = FillPlan(
+        case_key=case_key,
+        template_version_id=template_version.id,
+        evidence_bundle_id=bundle.id,
+    )
+    session.add(fill_plan)
+    session.flush()
+    revision = _fill_plan_revision(fill_plan.id, 1, payload)
+    session.add(revision)
+    session.commit()
+    session.refresh(fill_plan)
+    return fill_plan
+
+
+def revise_fill_plan(
+    session: Session,
+    fill_plan: FillPlan,
+    expected_revision: int,
+    selected_candidates: dict[str, str | None],
+    derivations: list[dict[str, object]],
+) -> FillPlanRevision:
+    if fill_plan.current_revision != expected_revision:
+        raise RevisionConflict(
+            f"Expected revision {expected_revision}, current revision is {fill_plan.current_revision}"
+        )
+    current = session.scalar(
+        select(FillPlanRevision).where(
+            FillPlanRevision.fill_plan_id == fill_plan.id,
+            FillPlanRevision.revision == fill_plan.current_revision,
+        )
+    )
+    if current is None:
+        raise ValueError("Current Fill Plan revision is missing")
+    payload = apply_revision(current.payload, selected_candidates, derivations)
+    next_number = fill_plan.current_revision + 1
+    revision = _fill_plan_revision(fill_plan.id, next_number, payload)
+    session.add(revision)
+    fill_plan.current_revision = next_number
+    session.commit()
+    session.refresh(revision)
+    return revision
+
+
+def _fill_plan_revision(fill_plan_id: str, revision: int, payload: dict) -> FillPlanRevision:
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+    return FillPlanRevision(
+        fill_plan_id=fill_plan_id,
+        revision=revision,
+        mapper_version=MAPPER_VERSION,
+        payload_sha256=hashlib.sha256(canonical).hexdigest(),
+        payload=payload,
+    )

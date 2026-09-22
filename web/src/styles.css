@@ -73,3 +73,39 @@ header { height: 74px; border-bottom: 1px solid var(--line); display: flex; alig
 .text-source { flex: 1; overflow: auto; padding: 45px; background: #fff; font: 13px/1.7 "DM Mono"; }
 .text-source p { margin: 0; padding: 6px 10px; border-left: 3px solid transparent; white-space: pre-wrap; }
 .text-source p.active { background: #eff8ca; border-left-color: #718637; }
+
+.fill-plan-hero:after { content: "03"; }
+.fill-plan-library { padding-bottom: 70px; }
+.mapping-create { width: 100%; text-align: left; cursor: pointer; color: inherit; }
+.mapping-create:disabled { opacity: .6; cursor: wait; }
+.file-icon.mapping { background: #e5ead8; color: #536629; }
+.blocker-count { font: 8px "DM Mono"; color: #963d29; background: #fae4da; padding: 5px 7px; border-radius: 4px; }
+.mapping-workbench { grid-template-columns: 310px minmax(500px, 1fr) 360px; }
+.mapping-row { grid-template-columns: 28px 1fr 8px; }
+.mapping-state { width: 8px; height: 8px; border-radius: 50%; background: #aaa; }
+.mapping-state.proposed { background: #62a16d; }
+.mapping-state.unresolved { background: #d1844c; }
+.mapping-state.not_applicable { background: #a7aaa4; }
+.mapping-properties { padding: 0 18px 28px; overflow-y: auto; }
+.target-identity { padding: 12px; border-radius: 6px; background: #e9e8e1; margin-bottom: 12px; }
+.target-identity span, .target-identity small { display: block; font: 8px "DM Mono"; color: #7d8078; }
+.target-identity strong { display: block; font-size: 12px; margin: 5px 0; }
+.candidate-card { border: 1px solid var(--line); border-radius: 7px; background: white; padding: 12px; margin-bottom: 10px; }
+.candidate-card.selected { border-color: #789268; box-shadow: inset 3px 0 #8faa55; }
+.candidate-heading { display: flex; justify-content: space-between; gap: 8px; align-items: start; }
+.candidate-heading strong { font-size: 12px; word-break: break-word; }
+.candidate-heading span { font: 7px "DM Mono"; text-transform: uppercase; background: #e9eddf; color: #53652d; border-radius: 99px; padding: 4px 6px; }
+.candidate-card > p { font: 8px "DM Mono"; color: #777a72; word-break: break-word; }
+.candidate-metrics { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 10px; }
+.candidate-metrics span { font: 7px "DM Mono"; padding: 4px 5px; background: #efeee9; border-radius: 3px; color: #686b65; }
+.candidate-card .location-card { margin: 8px 0; }
+.source-link { display: inline-block; font-size: 9px; color: #3e6956; margin: 3px 0 7px; }
+.mapping-issue { display: flex; gap: 7px; border-radius: 6px; padding: 9px; margin: 8px 0; font-size: 9px; line-height: 1.4; background: #f0eee7; }
+.mapping-issue svg { flex: 0 0 auto; }
+.mapping-issue strong { display: block; text-transform: capitalize; }
+.mapping-issue.review { background: #fff0e3; color: #87522e; }
+.mapping-issue.blocker { background: #f9e2da; color: #913d2b; }
+.alternatives-title { margin: 20px 0 8px; }
+.empty-candidates { font-size: 10px; line-height: 1.5; color: #73766e; padding: 12px; border: 1px dashed #c8c7c0; border-radius: 6px; }
+.derivation-card { display: grid; gap: 4px; padding: 9px; background: #e8edf0; border-radius: 5px; font: 8px "DM Mono"; color: #53626b; }
+.derivation-card strong { font-size: 10px; }
