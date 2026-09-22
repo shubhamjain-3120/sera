@@ -6,7 +6,7 @@ import { API, api, type GridCell } from "./api";
 import type { Agency, Artifact, Draft, EvidenceFact, EvidenceLocation, EvidenceSource, FieldType, FillPlanTarget, Location, MappingCandidate, ReviewAction, ReviewDecision, TemplateField, VerificationFinding, VerificationReport } from "./types";
 
 function App() {
-  return <Routes><Route path="/" element={<Library />} /><Route path="/templates/:artifactId/:draftId" element={<Inspector />} /><Route path="/evidence" element={<EvidenceLibrary />} /><Route path="/evidence/process/:artifactId" element={<EvidenceRun />} /><Route path="/evidence/:artifactId/:snapshotId" element={<EvidenceInspector />} /><Route path="/fill-plans" element={<FillPlanLibrary />} /><Route path="/fill-plans/:fillPlanId" element={<FillPlanInspector />} /></Routes>;
+  return <Routes><Route path="/" element={<Library />} /><Route path="/templates/:artifactId/:draftId" element={<Inspector />} /><Route path="/evidence" element={<EvidenceLibrary />} /><Route path="/evidence/process/:artifactId" element={<EvidenceRun />} /><Route path="/evidence/:artifactId/:snapshotId" element={<EvidenceInspector />} /><Route path="/fill-plans" element={<FillPlanLibrary />} /><Route path="/fill-plans/process/:runId" element={<FillPlanRun />} /><Route path="/fill-plans/:fillPlanId" element={<FillPlanInspector />} /></Routes>;
 }
 
 function Brand() {
@@ -158,7 +158,7 @@ function FillPlanLibrary() {
       if (!versions.length) throw new Error("Publish this template before creating a Fill Plan");
       return api.createFillPlan(activeCase, versions[0].id, activeAgency);
     },
-    onSuccess: (plan) => { client.invalidateQueries({ queryKey: ["fill-plans"] }); navigate(`/fill-plans/${plan.id}`); },
+    onSuccess: (run) => { client.invalidateQueries({ queryKey: ["fill-plans"] }); navigate(`/fill-plans/process/${run.id}`); },
   });
   return <div className="app-shell">
     <header><Brand /><WorkspaceNav /><div className="phase-badge"><span /> Phase 5 · Human review</div></header>
@@ -194,6 +194,21 @@ function AgencyDetails({ agency }: { agency: Agency }) {
     {open && <div className="agency-actions"><p>These values fill agency-owned fields on every form and are never taken from an applicant's documents.</p><button className="primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}><Save size={15} /> {save.isPending ? "Saving…" : "Save details"}</button></div>}
     {save.error && <div className="error-banner">{save.error.message}</div>}
   </section>;
+}
+
+function FillPlanRun() {
+  const navigate = useNavigate();
+  const { runId = "" } = useParams();
+  const run = useQuery({
+    queryKey: ["run", runId],
+    queryFn: () => api.run(runId),
+    refetchInterval: (query) => (["succeeded", "failed"].includes(query.state.data?.status ?? "") ? false : 700),
+  });
+  const fillPlanId = run.data?.result?.fill_plan_id;
+  useEffect(() => {
+    if (run.data?.status === "succeeded" && typeof fillPlanId === "string") navigate(`/fill-plans/${fillPlanId}`, { replace: true });
+  }, [run.data?.status, fillPlanId, navigate]);
+  return <Processing run={run.data} error={run.error} title="Grounded mapping" />;
 }
 
 function FillPlanInspector() {
@@ -289,8 +304,30 @@ function Inspector() {
   return <Editor initial={draftQuery.data} artifactId={artifactId} />;
 }
 
-function Processing({ run, error }: { run?: { status: string; progress: number; error?: string }; error: Error | null }) {
-  return <div className="processing"><Brand /><div className="processing-card"><div className="radar"><span /></div><p className="eyebrow">Native inspection</p><h1>{run?.status === "failed" ? "Inspection stopped" : "Reading the document structure"}</h1><p>{run?.error || error?.message || "Reconciling fields, widgets, validations, names, and package parts."}</p><div className="progress"><i style={{ width: `${run?.progress ?? 4}%` }} /></div><span>{run?.progress ?? 4}%</span></div></div>;
+const STAGE_LABELS: Record<string, string> = {
+  queued: "Waiting to start",
+  inspection: "Reading the document structure",
+  parsing: "Parsing the original document",
+  "semantic-extraction": "Extracting facts and provenance",
+  "resolving-agency": "Resolving the filing agency",
+  "freezing-evidence": "Freezing the case evidence bundle",
+  "deterministic-mapping": "Matching fields to evidence",
+  "saving-revision": "Saving the Fill Plan revision",
+  complete: "Finishing up",
+};
+
+function stageLabel(stage?: string) {
+  if (!stage) return "Working";
+  if (stage.startsWith("model-adjudication")) {
+    const [done, total] = stage.split(" ")[1]?.split("/") ?? [];
+    return total ? `Reviewing uncertain fields — batch ${Number(done) + 1} of ${total}` : "Reviewing uncertain fields";
+  }
+  return STAGE_LABELS[stage] ?? stage.replaceAll("-", " ");
+}
+
+function Processing({ run, error, title }: { run?: { status: string; stage?: string; progress: number; error?: string }; error: Error | null; title?: string }) {
+  const failed = run?.status === "failed";
+  return <div className="processing"><Brand /><div className="processing-card"><div className="radar"><span /></div><p className="eyebrow">{title ?? "Native inspection"}</p><h1>{failed ? "Stopped" : stageLabel(run?.stage)}</h1><p>{run?.error || error?.message || "Each step is reported as it runs. Model review of uncertain fields can take a few minutes."}</p><div className="progress"><i style={{ width: `${run?.progress ?? 4}%` }} /></div><span>{run?.stage && !failed ? `${run.stage} · ` : ""}{run?.progress ?? 4}%</span></div></div>;
 }
 
 function Editor({ initial, artifactId }: { initial: Draft; artifactId: string }) {

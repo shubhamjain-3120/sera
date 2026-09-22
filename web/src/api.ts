@@ -44,7 +44,7 @@ export const api = {
   listFillPlans: () => request<FillPlanSummary[]>("/api/v1/fill-plans"),
   fillPlan: (id: string) => request<FillPlan>(`/api/v1/fill-plans/${id}`),
   createFillPlan: (caseKey: string, templateVersionId: string, agencyKey: string) =>
-    request<FillPlan>("/api/v1/fill-plans", {
+    request<Run>("/api/v1/fill-plans", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ case_key: caseKey, template_version_id: templateVersionId, agency_key: agencyKey }),

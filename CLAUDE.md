@@ -85,10 +85,7 @@ hash-addressed, and the object graph in `app/models.py` mirrors the pipeline dir
    fill plans for that case. `case_key` is the evidence isolation boundary — it is what keeps one client's
    documents out of another's fill plan — and is derived per upload batch by `new_case_key`, not chosen from
    a fixed list.
-4. **Mapping** — no LLM is involved anywhere in this pipeline today; `deterministic-mapper-v1` is token
-   overlap plus `difflib` string similarity, and the "independent" verifier in step 5 reuses that same
-   matching logic. The Model Gateway the plan describes (`docs/IMPLEMENTATION_PLAN.md:68`) does not exist.
-   `app/mapping.py` (`build_fill_plan`) deterministically matches template fields against
+4. **Mapping** — `app/mapping.py` (`build_fill_plan`) deterministically matches template fields against
    evidence facts from `app/evidence/retrieve.py` candidate pools (semantic type, entity role, token/string
    similarity, exact-choice matching, typed normalization), producing scored candidates per target field.
    Nothing is silently auto-selected when ambiguous; unresolved/blocked targets carry explicit issues.
@@ -103,6 +100,42 @@ hash-addressed, and the object graph in `app/models.py` mirrors the pipeline dir
    independent model-based pass that can only flag findings (wrong entity, unsupported value, conflicting
    evidence, missed evidence) — it has no code path that can alter a selected value. Both run before a
    `VerificationReport` is persisted, hash-pinned to the fill plan revision and evidence bundle.
+
+### Model Gateway
+
+`app/gateway.py` is the only place the application talks to a model provider (OpenAI Responses API with
+Pydantic structured outputs). `app/reasoning.py` holds the four stage passes that use it; `app/mapping.py`
+and `app/verification.py` stay provider-free. Rules that hold across every stage:
+
+- **Deterministic first, model second.** Each pass runs *after* the deterministic result exists and may only
+  refine what rules could not settle. If the gateway is disabled or the call fails, the deterministic result
+  stands unchanged — that is also what keeps CI deterministic without credentials.
+- **The model never supplies a value.** Mapping returns a `candidate_id`; the value and provenance are
+  resolved from the frozen evidence fact. A cited id that is not among that target's own candidates is
+  discarded (`rejected_target_ids`). Evidence classification may relabel a fact's `key`/`entity_role` but
+  never its value or locators.
+- **Failure is never a pass.** `ModelResult.outcome` distinguishes `disabled`/`refused`/`incomplete`/
+  `invalid`/`error`, and a verifier that could not run returns `needs_review`, not `pass`.
+- Model ids and reasoning effort live only in settings (`MODEL_MAPPING`, `MODEL_REASONING_EFFORT`), never in
+  business logic. Every call persists a `ModelInvocation` trace (model, prompt/schema version, duration,
+  usage, error, input/result references).
+- **Tests must never reach the provider.** A developer's `.env` holds a live key and `Settings` reads it, so
+  `tests/conftest.py` strips it from every test via an autouse fixture, and
+  `test_the_suite_never_runs_against_a_real_provider` fails if that stops working. Stage tests build their
+  own `Settings` and inject a stub client. Do not remove that fixture to "make a test pass" — it is what
+  keeps the suite free and deterministic.
+- **Batch every stage call.** A whole form in one request exceeds the timeout — 143 unresolved targets at
+  effort `max` timed out after 6 minutes (3 attempts × 120s). Each pass chunks its items by
+  `MODEL_BATCH_SIZE` and merges per-batch traces, so one failed batch costs only its own items
+  (`outcome: "partial"`) instead of the whole stage.
+- **Never hold a write transaction across a model call.** `inspect_artifact`, `ingest_evidence` and
+  `create_fill_plan` each commit before their model pass. SQLite allows one writer, so a background run
+  waiting on a provider previously made concurrent requests fail with `database is locked`. The engine also
+  sets WAL and a 15s busy timeout (`app/db.py`); `tests/test_db_concurrency.py` reproduces the failure
+  against the stock settings and proves the fix.
+- Report reuse is keyed on the verifier that would actually run (`verifier.version`), not a fixed constant,
+  so switching between the heuristic and model verifier produces a new report rather than a unique-constraint
+  collision.
 
 Versioning/immutability pattern used throughout: mutable draft → `expected_revision`-guarded update →
 immutable published/frozen entity, each identified by a canonical-JSON SHA-256 hash (`json.dumps(...,

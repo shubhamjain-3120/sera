@@ -743,12 +743,12 @@
           }
         },
         "responses": {
-          "201": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FillPlanResponse"
+                  "$ref": "#/components/schemas/RunResponse"
                 }
               }
             }

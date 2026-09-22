@@ -4,6 +4,7 @@ import time
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -12,6 +13,7 @@ from app.agencies import AGENCY_SOURCE_VERSION, SEED_AGENCIES, agency_facts
 from app.config import get_settings
 from app.evidence import extract_evidence, native_parse
 from app.evidence.retrieve import candidate_pools
+from app.gateway import ModelGateway
 from app.inspectors import inspect_pdf, inspect_xlsx
 from app.mapping import MAPPER_VERSION, apply_revision, build_fill_plan
 from app.models import (
@@ -21,6 +23,7 @@ from app.models import (
     EvidenceSnapshot,
     FillPlan,
     FillPlanRevision,
+    ModelInvocation,
     ProcessingRun,
     ReviewDecision,
     RunStatus,
@@ -30,12 +33,17 @@ from app.models import (
     new_id,
 )
 from app.parsers.reducto import ReductoParserAdapter
+from app.reasoning import (
+    ModelEvidenceVerifier,
+    adjudicate_mapping,
+    classify_evidence_facts,
+    propose_semantic_types,
+)
 from app.review import apply_review_decision
 from app.schemas import TemplateSchema
 from app.storage import ObjectStorage
 from app.verification import (
     DETERMINISTIC_VERSION,
-    VERIFIER_VERSION,
     EvidenceAwareVerifier,
     build_verification_report,
 )
@@ -83,6 +91,12 @@ def inspect_artifact(session: Session, storage: ObjectStorage, run_id: str) -> N
                 )
         else:
             schema = inspect_xlsx(BytesIO(content))
+        # No write transaction may be open across the model call below.
+        session.commit()
+        schema, semantics_trace = propose_semantic_types(
+            schema, ModelGateway(), input_reference=run.artifact.sha256
+        )
+        record_invocation(session, semantics_trace)
         run.progress = 90
         run.result = schema
         draft = session.scalar(select(TemplateDraft).where(TemplateDraft.artifact_id == run.artifact_id))
@@ -167,6 +181,12 @@ def ingest_evidence(session: Session, storage: ObjectStorage, run_id: str) -> No
             provider,
             parsed.parser_version,
         )
+        # No write transaction may be open across the model call below.
+        session.commit()
+        payload, classification_trace = classify_evidence_facts(
+            payload, ModelGateway(), input_reference=run.artifact.sha256
+        )
+        record_invocation(session, classification_trace)
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
         snapshot_hash = hashlib.sha256(canonical).hexdigest()
         snapshot = session.scalar(
@@ -235,6 +255,30 @@ def publish_draft(session: Session, draft: TemplateDraft, expected_revision: int
     return version
 
 
+def record_invocation(
+    session: Session, trace: dict[str, Any], *, result_reference: str | None = None
+) -> None:
+    """Persist one Model Gateway execution trace. Never fails the caller."""
+    usage = trace.get("usage") or {}
+    session.add(
+        ModelInvocation(
+            stage=str(trace.get("stage", "unknown")),
+            outcome=str(trace.get("outcome", "unknown")),
+            provider=str(trace.get("provider", "unknown")),
+            model=trace.get("model"),
+            prompt_version=trace.get("prompt_version"),
+            schema_version=trace.get("schema_version"),
+            input_reference=trace.get("input_reference"),
+            result_reference=result_reference,
+            duration_ms=trace.get("duration_ms"),
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            error=trace.get("error") or trace.get("refusal") or trace.get("incomplete_reason"),
+            trace=trace,
+        )
+    )
+
+
 def seed_agencies(session: Session) -> None:
     """Ensure the configured agencies exist without overwriting edited details."""
     for seed in SEED_AGENCIES:
@@ -277,13 +321,24 @@ def new_case_key(session: Session) -> str:
     raise ValueError(f"Exhausted case identifiers for {stamp}")
 
 
+def _report(session: Session, run: ProcessingRun | None, stage: str, progress: int) -> None:
+    """Publish the current step so a polling client can show it."""
+    if run is None:
+        return
+    run.stage = stage
+    run.progress = progress
+    session.commit()
+
+
 def create_fill_plan(
     session: Session,
     case_key: str,
     template_version: TemplateVersion,
     snapshot_ids: list[str] | None = None,
     agency_key: str | None = None,
+    run: ProcessingRun | None = None,
 ) -> FillPlan:
+    _report(session, run, "resolving-agency", 5)
     agency = resolve_agency(session, agency_key)
     if snapshot_ids is None:
         rows = session.execute(
@@ -333,7 +388,10 @@ def create_fill_plan(
             bundle_sha256=bundle_hash,
         )
         session.add(bundle)
-        session.flush()
+        # Commit the bundle before any model call below, so a slow provider
+        # response never holds a write transaction open against other requests.
+        session.commit()
+    _report(session, run, "freezing-evidence", 15)
     existing = session.scalar(
         select(FillPlan).where(
             FillPlan.template_version_id == template_version.id,
@@ -343,6 +401,7 @@ def create_fill_plan(
     )
     if existing:
         return existing
+    _report(session, run, "deterministic-mapping", 25)
     payload = build_fill_plan(
         template_version.schema,
         [(snapshot.id, snapshot.snapshot) for snapshot in ordered],
@@ -365,6 +424,20 @@ def create_fill_plan(
         "name": agency.name,
         "source_version": AGENCY_SOURCE_VERSION,
     }
+    # Deterministic mapping above owns the result; the model only settles what
+    # string matching left unresolved, and only by citing an existing candidate.
+    def on_batch(done: int, total: int) -> None:
+        _report(session, run, f"model-adjudication {done}/{total}", 30 + int(60 * done / max(1, total)))
+
+    payload, mapping_trace = adjudicate_mapping(
+        payload,
+        ModelGateway(),
+        input_reference=template_version.schema_sha256,
+        on_batch=on_batch,
+    )
+    payload["mapping_trace"] = mapping_trace
+    record_invocation(session, mapping_trace)
+    _report(session, run, "saving-revision", 95)
     fill_plan = FillPlan(
         case_key=case_key,
         agency_key=agency.key,
@@ -504,10 +577,14 @@ def verify_fill_plan_revision(
     )
     if revision is None:
         raise ValueError(f"Fill Plan revision {number} was not found")
+    gateway = ModelGateway()
+    verifier = ModelEvidenceVerifier(gateway) if gateway.enabled else EvidenceAwareVerifier()
+    # Reuse must be keyed on the verifier that would actually run; a report from
+    # a different verifier is a different result, not this one.
     existing = session.scalar(
         select(VerificationReport).where(
             VerificationReport.fill_plan_revision_id == revision.id,
-            VerificationReport.verifier_version == VERIFIER_VERSION,
+            VerificationReport.verifier_version == verifier.version,
         )
     )
     if existing:
@@ -523,7 +600,6 @@ def verify_fill_plan_revision(
     }
     if set(snapshots_by_id) != set(bundle.snapshot_ids):
         raise ValueError("Frozen evidence bundle is incomplete")
-    verifier = EvidenceAwareVerifier()
     result = build_verification_report(
         revision.payload,
         [snapshots_by_id[snapshot_id].snapshot for snapshot_id in bundle.snapshot_ids],
@@ -560,6 +636,8 @@ def verify_fill_plan_revision(
         report=result,
     )
     session.add(report)
+    if isinstance(verifier, ModelEvidenceVerifier) and verifier.last_trace:
+        record_invocation(session, verifier.last_trace, result_reference=report_hash)
     session.commit()
     session.refresh(report)
     return report

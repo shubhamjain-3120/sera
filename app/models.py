@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -141,6 +142,27 @@ class EvidenceBundle(Base):
     case_key: Mapped[str] = mapped_column(String(64), index=True)
     snapshot_ids: Mapped[list[str]] = mapped_column(JSON)
     bundle_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ModelInvocation(Base):
+    """Execution trace for one Model Gateway call, kept for audit and cost."""
+
+    __tablename__ = "model_invocations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    stage: Mapped[str] = mapped_column(String(64), index=True)
+    outcome: Mapped[str] = mapped_column(String(32), index=True)
+    provider: Mapped[str] = mapped_column(String(64))
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    schema_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    input_reference: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    result_reference: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
+    duration_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    trace: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 

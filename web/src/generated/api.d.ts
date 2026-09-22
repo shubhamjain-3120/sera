@@ -1590,12 +1590,12 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            201: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FillPlanResponse"];
+                    "application/json": components["schemas"]["RunResponse"];
                 };
             };
             /** @description Validation Error */

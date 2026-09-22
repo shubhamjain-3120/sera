@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -13,6 +14,7 @@ from app.config import get_settings
 from app.db import Base, SessionLocal, engine, get_db
 from app.inspectors.pdf import render_pdf_page
 from app.inspectors.xlsx import read_sheet_grid
+from app.mapping import MAPPER_VERSION
 from app.models import (
     Agency,
     Artifact,
@@ -24,6 +26,7 @@ from app.models import (
     FillPlanRevision,
     ProcessingRun,
     ReviewDecision,
+    RunStatus,
     TemplateDraft,
     TemplateVersion,
     VerificationReport,
@@ -488,18 +491,60 @@ def _fill_plan_response(db: Session, fill_plan: FillPlan) -> FillPlanResponse:
     )
 
 
-@app.post("/api/v1/fill-plans", response_model=FillPlanResponse, status_code=201)
-def post_fill_plan(request: FillPlanCreate, db: Db) -> FillPlanResponse:
+def create_fill_plan_background(run_id: str, request: FillPlanCreate) -> None:
+    """Mapping can take minutes, so it reports progress through its own run."""
+    with SessionLocal() as session:
+        run = session.get(ProcessingRun, run_id)
+        version = session.get(TemplateVersion, request.template_version_id)
+        if run is None or version is None:
+            return
+        run.status = RunStatus.RUNNING
+        run.started_at = datetime.now(UTC)
+        session.commit()
+        try:
+            fill_plan = create_fill_plan(
+                session,
+                request.case_key,
+                version,
+                request.evidence_snapshot_ids,
+                request.agency_key,
+                run,
+            )
+            run.result = {"fill_plan_id": fill_plan.id}
+            run.status = RunStatus.SUCCEEDED
+            run.stage = "complete"
+            run.progress = 100
+        except Exception as exc:
+            session.rollback()
+            run = session.get(ProcessingRun, run_id)
+            if run is None:
+                return
+            run.status = RunStatus.FAILED
+            run.error = f"{type(exc).__name__}: {exc}"
+        run.finished_at = datetime.now(UTC)
+        session.commit()
+
+
+@app.post("/api/v1/fill-plans", response_model=RunResponse, status_code=202)
+def post_fill_plan(request: FillPlanCreate, background: BackgroundTasks, db: Db) -> RunResponse:
     version = db.get(TemplateVersion, request.template_version_id)
     if version is None:
         raise HTTPException(404, "Published template version not found")
-    try:
-        fill_plan = create_fill_plan(
-            db, request.case_key, version, request.evidence_snapshot_ids, request.agency_key
-        )
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    return _fill_plan_response(db, fill_plan)
+    draft = db.get(TemplateDraft, version.draft_id)
+    if draft is None:
+        raise HTTPException(500, "Published version has no template draft")
+    run = ProcessingRun(
+        artifact_id=draft.artifact_id,
+        stage="queued",
+        provider="mapping",
+        parser_version=MAPPER_VERSION,
+        config_snapshot={"case_key": request.case_key, "agency_key": request.agency_key},
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    background.add_task(create_fill_plan_background, run.id, request)
+    return _run_response(run)
 
 
 @app.get("/api/v1/fill-plans", response_model=list[FillPlanSummary])
