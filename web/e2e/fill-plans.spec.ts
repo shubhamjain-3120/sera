@@ -23,6 +23,14 @@ test("shows frozen evidence, target overlay, alternatives, and unresolved issues
     },
   } }));
   await page.route("**/api/v1/artifacts/target-1/pages/1.png**", (route) => route.fulfill({ contentType: "image/png", body: "" }));
+  await page.route("**/api/v1/fill-plans/plan-1/verifications", (route) => route.fulfill({ json: [{
+    id: "report-1", fill_plan_revision_id: "revision-1", fill_plan_revision: 1, status: "needs_review", deterministic_version: "deterministic-validation-v1", verifier_version: "independent-evidence-verifier-v1", provider: "local-independent", model: null, input_sha256: "c".repeat(64), report_sha256: "d".repeat(64), created_at: new Date().toISOString(),
+    report: {
+      status: "needs_review", selection_unchanged: true, selection_hash_before: "e".repeat(64), selection_hash_after: "e".repeat(64), trace: {},
+      deterministic: { version: "deterministic-validation-v1", status: "pass", findings: [] },
+      independent: { version: "independent-evidence-verifier-v1", status: "needs_review", additional_evidence: [{ target_id: "name", snapshot_fact_id: "fact-1", value: "Amina", confidence: 0.97, provenance: [location] }], duration_ms: 2, findings: [{ id: "finding-1", source: "verifier", code: "missed_evidence", severity: "review", target_id: "name", message: "The verifier found plausible evidence that the mapper did not select.", evidence: [location] }] },
+    },
+  }] }));
   await page.goto("/fill-plans/plan-1");
   await expect(page.getByText(/Evidence frozen/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Needs review" })).toBeVisible();
@@ -30,4 +38,7 @@ test("shows frozen evidence, target overlay, alternatives, and unresolved issues
   await expect(page.getByText("Amira", { exact: true })).toBeVisible();
   await expect(page.getByText("Multiple similarly matched facts have different values")).toBeVisible();
   await expect(page.getByText("Page 1 · [0.1, 0.2, 0.4, 0.3]", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Verification · revision 1")).toBeVisible();
+  await expect(page.getByText("The verifier found plausible evidence that the mapper did not select.")).toBeVisible();
+  await expect(page.getByText(/Selections unchanged/)).toBeVisible();
 });

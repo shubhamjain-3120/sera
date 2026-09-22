@@ -230,6 +230,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fill-plans/{fill_plan_id}/verifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Verifications */
+        get: operations["list_verifications_api_v1_fill_plans__fill_plan_id__verifications_get"];
+        put?: never;
+        /** Post Verification */
+        post: operations["post_verification_api_v1_fill_plans__fill_plan_id__verifications_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -736,6 +754,10 @@ export interface components {
             widget_count: number;
             /** Widget Options */
             widget_options?: components["schemas"]["WidgetOption"][];
+            /** Constraints */
+            constraints?: {
+                [key: string]: unknown;
+            };
         };
         /** TemplateSchema */
         TemplateSchema: {
@@ -770,6 +792,41 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** VerificationReportResponse */
+        VerificationReportResponse: {
+            /** Id */
+            id: string;
+            /** Fill Plan Revision Id */
+            fill_plan_revision_id: string;
+            /** Fill Plan Revision */
+            fill_plan_revision: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pass" | "fail" | "needs_review";
+            /** Deterministic Version */
+            deterministic_version: string;
+            /** Verifier Version */
+            verifier_version: string;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string | null;
+            /** Input Sha256 */
+            input_sha256: string;
+            /** Report Sha256 */
+            report_sha256: string;
+            /** Report */
+            report: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** VersionResponse */
         VersionResponse: {
@@ -1365,6 +1422,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FillPlanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_verifications_api_v1_fill_plans__fill_plan_id__verifications_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fill_plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerificationReportResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_verification_api_v1_fill_plans__fill_plan_id__verifications_post: {
+        parameters: {
+            query?: {
+                revision?: number | null;
+            };
+            header?: never;
+            path: {
+                fill_plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerificationReportResponse"];
                 };
             };
             /** @description Validation Error */

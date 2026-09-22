@@ -23,10 +23,17 @@ from app.models import (
     RunStatus,
     TemplateDraft,
     TemplateVersion,
+    VerificationReport,
 )
 from app.parsers.reducto import ReductoParserAdapter
 from app.schemas import TemplateSchema
 from app.storage import ObjectStorage
+from app.verification import (
+    DETERMINISTIC_VERSION,
+    VERIFIER_VERSION,
+    EvidenceAwareVerifier,
+    build_verification_report,
+)
 
 
 class RevisionConflict(Exception):
@@ -114,7 +121,13 @@ def ingest_evidence(session: Session, storage: ObjectStorage, run_id: str) -> No
             content = source.read()
         settings = get_settings()
         allow_native_fallback = bool(run.config_snapshot.get("allow_native_fallback", False))
-        if settings.reducto_api_key:
+        # This flag is set only by deterministic test/evaluation callers. It
+        # deliberately wins over ambient developer credentials so CI fixtures
+        # never become dependent on a live provider response.
+        if allow_native_fallback:
+            parsed = native_parse(run.artifact.kind.value, content)
+            provider = "native-test-fallback"
+        elif settings.reducto_api_key:
             adapter = ReductoParserAdapter(settings.reducto_api_key, settings.reducto_base_url)
             job_id = adapter.submit(run.artifact.filename, content)
             run.provider_job_id = job_id
@@ -131,9 +144,6 @@ def ingest_evidence(session: Session, storage: ObjectStorage, run_id: str) -> No
             else:
                 raise TimeoutError("Reducto parse did not finish within the ingestion window")
             provider = "reducto"
-        elif allow_native_fallback:
-            parsed = native_parse(run.artifact.kind.value, content)
-            provider = "native-test-fallback"
         else:
             raise RuntimeError(
                 "Reducto is required for evidence ingestion. Configure REDUCTO_API_KEY; "
@@ -351,3 +361,76 @@ def _fill_plan_revision(fill_plan_id: str, revision: int, payload: dict) -> Fill
         payload_sha256=hashlib.sha256(canonical).hexdigest(),
         payload=payload,
     )
+
+
+def verify_fill_plan_revision(
+    session: Session, fill_plan: FillPlan, revision_number: int | None = None
+) -> VerificationReport:
+    number = revision_number or fill_plan.current_revision
+    revision = session.scalar(
+        select(FillPlanRevision).where(
+            FillPlanRevision.fill_plan_id == fill_plan.id,
+            FillPlanRevision.revision == number,
+        )
+    )
+    if revision is None:
+        raise ValueError(f"Fill Plan revision {number} was not found")
+    existing = session.scalar(
+        select(VerificationReport).where(
+            VerificationReport.fill_plan_revision_id == revision.id,
+            VerificationReport.verifier_version == VERIFIER_VERSION,
+        )
+    )
+    if existing:
+        return existing
+    bundle = session.get(EvidenceBundle, fill_plan.evidence_bundle_id)
+    if bundle is None:
+        raise ValueError("Frozen evidence bundle is missing")
+    snapshots_by_id = {
+        item.id: item
+        for item in session.scalars(
+            select(EvidenceSnapshot).where(EvidenceSnapshot.id.in_(bundle.snapshot_ids))
+        ).all()
+    }
+    if set(snapshots_by_id) != set(bundle.snapshot_ids):
+        raise ValueError("Frozen evidence bundle is incomplete")
+    verifier = EvidenceAwareVerifier()
+    result = build_verification_report(
+        revision.payload,
+        [snapshots_by_id[snapshot_id].snapshot for snapshot_id in bundle.snapshot_ids],
+        verifier,
+    )
+    input_material = {
+        "fill_plan_revision_sha256": revision.payload_sha256,
+        "evidence_bundle_sha256": bundle.bundle_sha256,
+        "deterministic_version": DETERMINISTIC_VERSION,
+        "verifier_version": verifier.version,
+    }
+    input_hash = hashlib.sha256(
+        json.dumps(input_material, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    result["trace"] = {
+        **input_material,
+        "provider": verifier.provider,
+        "model": verifier.model,
+        "prompt_version": "verification-contract-v1",
+        "schema_version": "verification-report-v1",
+    }
+    report_hash = hashlib.sha256(
+        json.dumps(result, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()
+    report = VerificationReport(
+        fill_plan_revision_id=revision.id,
+        status=result["status"],
+        deterministic_version=DETERMINISTIC_VERSION,
+        verifier_version=verifier.version,
+        provider=verifier.provider,
+        model=verifier.model,
+        input_sha256=input_hash,
+        report_sha256=report_hash,
+        report=result,
+    )
+    session.add(report)
+    session.commit()
+    session.refresh(report)
+    return report

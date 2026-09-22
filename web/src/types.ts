@@ -34,6 +34,7 @@ export interface TemplateField {
   widgets?: Location[];
   widget_count?: number;
   widget_options?: Array<{ export_value?: string | null; label?: string | null; location: Location }>;
+  constraints?: Record<string, unknown>;
 }
 
 export interface TemplateSchema {
@@ -235,5 +236,38 @@ export interface FillPlan extends FillPlanSummary {
     issues: MappingIssue[];
     summary: { target_count: number; proposed_count: number; unresolved_count: number; issue_count: number; blocker_count: number };
     evidence_bundle: { id: string; case_key: string; snapshot_ids: string[]; sha256: string };
+  };
+}
+
+export interface VerificationFinding {
+  id: string;
+  source: "deterministic" | "verifier";
+  code: string;
+  severity: "info" | "review" | "blocker";
+  target_id?: string | null;
+  message: string;
+  evidence: EvidenceLocation[];
+}
+
+export interface VerificationReport {
+  id: string;
+  fill_plan_revision_id: string;
+  fill_plan_revision: number;
+  status: "pass" | "fail" | "needs_review";
+  deterministic_version: string;
+  verifier_version: string;
+  provider: string;
+  model?: string | null;
+  input_sha256: string;
+  report_sha256: string;
+  created_at: string;
+  report: {
+    status: "pass" | "fail" | "needs_review";
+    selection_unchanged: boolean;
+    selection_hash_before: string;
+    selection_hash_after: string;
+    deterministic: { version: string; status: "pass" | "fail"; findings: VerificationFinding[] };
+    independent: { version: string; status: "pass" | "fail" | "needs_review"; findings: VerificationFinding[]; additional_evidence: Array<{ target_id: string; snapshot_fact_id: string; value: unknown; confidence: number; provenance: EvidenceLocation[] }>; duration_ms: number };
+    trace: Record<string, unknown>;
   };
 }

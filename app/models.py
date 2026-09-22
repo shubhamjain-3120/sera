@@ -171,3 +171,28 @@ class FillPlanRevision(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     fill_plan: Mapped[FillPlan] = relationship()
+
+
+class VerificationReport(Base):
+    """Immutable verification result for one exact Fill Plan revision."""
+
+    __tablename__ = "verification_reports"
+    __table_args__ = (
+        UniqueConstraint(
+            "fill_plan_revision_id", "verifier_version", name="uq_verification_revision_version"
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    fill_plan_revision_id: Mapped[str] = mapped_column(
+        ForeignKey("fill_plan_revisions.id"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    deterministic_version: Mapped[str] = mapped_column(String(64))
+    verifier_version: Mapped[str] = mapped_column(String(64))
+    provider: Mapped[str] = mapped_column(String(64))
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    input_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    report_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    report: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    fill_plan_revision: Mapped[FillPlanRevision] = relationship()

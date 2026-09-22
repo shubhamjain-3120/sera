@@ -23,6 +23,7 @@ from app.models import (
     ProcessingRun,
     TemplateDraft,
     TemplateVersion,
+    VerificationReport,
 )
 from app.schemas import (
     ArtifactResponse,
@@ -36,6 +37,7 @@ from app.schemas import (
     FillPlanUpdate,
     PublishRequest,
     RunResponse,
+    VerificationReportResponse,
     VersionResponse,
 )
 from app.services import (
@@ -46,6 +48,7 @@ from app.services import (
     publish_draft,
     revise_fill_plan,
     update_draft,
+    verify_fill_plan_revision,
 )
 from app.storage import get_storage
 
@@ -102,7 +105,7 @@ def _run_response(run: ProcessingRun) -> RunResponse:
 
 @app.get("/api/v1/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "phase": "fill-plan-inspector"}
+    return {"status": "ok", "phase": "independent-verification"}
 
 
 @app.post("/api/v1/artifacts", response_model=ArtifactResponse, status_code=201)
@@ -465,3 +468,58 @@ def put_fill_plan(fill_plan_id: str, update: FillPlanUpdate, db: Db) -> FillPlan
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return _fill_plan_response(db, fill_plan)
+
+
+def _verification_response(db: Session, report: VerificationReport) -> VerificationReportResponse:
+    revision = db.get(FillPlanRevision, report.fill_plan_revision_id)
+    if revision is None:
+        raise HTTPException(500, "Verification report revision is missing")
+    return VerificationReportResponse(
+        id=report.id,
+        fill_plan_revision_id=report.fill_plan_revision_id,
+        fill_plan_revision=revision.revision,
+        status=report.status,
+        deterministic_version=report.deterministic_version,
+        verifier_version=report.verifier_version,
+        provider=report.provider,
+        model=report.model,
+        input_sha256=report.input_sha256,
+        report_sha256=report.report_sha256,
+        report=report.report,
+        created_at=report.created_at,
+    )
+
+
+@app.post(
+    "/api/v1/fill-plans/{fill_plan_id}/verifications",
+    response_model=VerificationReportResponse,
+    status_code=201,
+)
+def post_verification(
+    fill_plan_id: str, db: Db, revision: int | None = Query(default=None, ge=1)
+) -> VerificationReportResponse:
+    fill_plan = db.get(FillPlan, fill_plan_id)
+    if fill_plan is None:
+        raise HTTPException(404, "Fill Plan not found")
+    try:
+        report = verify_fill_plan_revision(db, fill_plan, revision)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _verification_response(db, report)
+
+
+@app.get(
+    "/api/v1/fill-plans/{fill_plan_id}/verifications",
+    response_model=list[VerificationReportResponse],
+)
+def list_verifications(fill_plan_id: str, db: Db) -> list[VerificationReportResponse]:
+    fill_plan = db.get(FillPlan, fill_plan_id)
+    if fill_plan is None:
+        raise HTTPException(404, "Fill Plan not found")
+    reports = db.scalars(
+        select(VerificationReport)
+        .join(FillPlanRevision)
+        .where(FillPlanRevision.fill_plan_id == fill_plan_id)
+        .order_by(FillPlanRevision.revision.desc(), VerificationReport.created_at.desc())
+    ).all()
+    return [_verification_response(db, report) for report in reports]

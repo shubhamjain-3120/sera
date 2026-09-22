@@ -1,4 +1,4 @@
-import type { Artifact, Draft, EvidenceSnapshot, EvidenceSource, FillPlan, FillPlanSummary, Run, TemplateSchema, TemplateVersion } from "./types";
+import type { Artifact, Draft, EvidenceSnapshot, EvidenceSource, FillPlan, FillPlanSummary, Run, TemplateSchema, TemplateVersion, VerificationReport } from "./types";
 
 export const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -49,6 +49,8 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ case_key: caseKey, template_version_id: templateVersionId }),
     }),
+  listVerifications: (fillPlanId: string) => request<VerificationReport[]>(`/api/v1/fill-plans/${fillPlanId}/verifications`),
+  verifyFillPlan: (fillPlanId: string, revision: number) => request<VerificationReport>(`/api/v1/fill-plans/${fillPlanId}/verifications?revision=${revision}`, { method: "POST" }),
   grid: (artifactId: string, sheet: string, row = 1, column = 1) => {
     const minRow = Math.max(1, row - 8);
     const minCol = Math.max(1, column - 3);

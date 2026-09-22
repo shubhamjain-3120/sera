@@ -799,6 +799,103 @@
           }
         }
       }
+    },
+    "/api/v1/fill-plans/{fill_plan_id}/verifications": {
+      "post": {
+        "summary": "Post Verification",
+        "operationId": "post_verification_api_v1_fill_plans__fill_plan_id__verifications_post",
+        "parameters": [
+          {
+            "name": "fill_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fill Plan Id"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Revision"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationReportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List Verifications",
+        "operationId": "list_verifications_api_v1_fill_plans__fill_plan_id__verifications_get",
+        "parameters": [
+          {
+            "name": "fill_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fill Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VerificationReportResponse"
+                  },
+                  "title": "Response List Verifications Api V1 Fill Plans  Fill Plan Id  Verifications Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2244,6 +2341,11 @@
             },
             "type": "array",
             "title": "Widget Options"
+          },
+          "constraints": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Constraints"
           }
         },
         "type": "object",
@@ -2347,6 +2449,88 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VerificationReportResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "fill_plan_revision_id": {
+            "type": "string",
+            "title": "Fill Plan Revision Id"
+          },
+          "fill_plan_revision": {
+            "type": "integer",
+            "title": "Fill Plan Revision"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail",
+              "needs_review"
+            ],
+            "title": "Status"
+          },
+          "deterministic_version": {
+            "type": "string",
+            "title": "Deterministic Version"
+          },
+          "verifier_version": {
+            "type": "string",
+            "title": "Verifier Version"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "input_sha256": {
+            "type": "string",
+            "title": "Input Sha256"
+          },
+          "report_sha256": {
+            "type": "string",
+            "title": "Report Sha256"
+          },
+          "report": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Report"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "fill_plan_revision_id",
+          "fill_plan_revision",
+          "status",
+          "deterministic_version",
+          "verifier_version",
+          "provider",
+          "model",
+          "input_sha256",
+          "report_sha256",
+          "report",
+          "created_at"
+        ],
+        "title": "VerificationReportResponse"
       },
       "VersionResponse": {
         "properties": {

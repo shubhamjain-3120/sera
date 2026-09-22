@@ -3,7 +3,7 @@
 The canonical phased roadmap and acceptance gates are documented in
 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md). Consult it before starting each phase.
 
-Phase 1 implements target ingestion and the Template Inspector. Phase 2 adds isolated source ingestion and an Evidence Inspector. Phase 3 adds grounded mapping and the Fill Plan Inspector. Originals remain immutable and content-addressed. Independent verification, human approval, and final output generation intentionally remain for later phases.
+Phase 1 implements target ingestion and the Template Inspector. Phase 2 adds isolated source ingestion and an Evidence Inspector. Phase 3 adds grounded mapping and the Fill Plan Inspector. Phase 4 adds deterministic validation and an independent evidence-aware verifier. Originals remain immutable and content-addressed. Human approval and final output generation intentionally remain for later phases.
 
 ## What is implemented
 
@@ -28,6 +28,9 @@ Inherited page widgets are reconciled through their terminal AcroForm parent. Wi
 - Conservative semantic/type/entity mapping with PostgreSQL full-text candidate retrieval, deterministic SQLite test behavior, exact choice matching, and auditable boolean/date/number normalization.
 - Grounded restricted derivations with exposed inputs and as-of dates, maximum depth two, cycle rejection, and mandatory later human review. Model-generated code is never executed.
 - Repeating-record accounting that retains every entity and creates a blocker when target capacity is exceeded. Prefilled target values require later disposition and are never treated as current-case evidence.
+- Immutable Verification Reports pinned to an exact Fill Plan revision, payload hash, frozen evidence bundle hash, deterministic/verifier versions, and execution trace.
+- Deterministic structural, type, choice, provenance, derivation-depth, reporting-period, forbidden-write, and repeating-capacity checks that always run before independent verification.
+- A separate evidence-aware verifier that detects wrong-entity selections, unsupported values, conflicting facts, and evidence the mapper missed. It can pass, fail, or request review, but has no path that can alter a selected value.
 
 The two supplied ZIPs and any extracted customer documents are ignored by Git. Filled reference outputs are not used by the application or test evidence.
 
@@ -67,6 +70,7 @@ uv run ruff check app tests migrations
 uv run pytest -q
 uv run python -m scripts.evaluate_phase2 "/path/to/input and filled form 1.zip" "/path/to/input and filled form 2.zip"
 uv run python -m scripts.evaluate_phase3
+uv run python -m scripts.evaluate_phase4
 cd web
 pnpm build
 pnpm test
@@ -74,6 +78,15 @@ pnpm test:e2e
 ```
 
 Regenerate TypeScript OpenAPI contracts after an API change with `cd web && pnpm contracts`.
+
+## Manual Phase 4 acceptance walkthrough
+
+1. Complete the Phase 3 walkthrough and open a Fill Plan. Click **Run verification**. Confirm the report is labeled with the exact Fill Plan revision and separately shows deterministic and independent outcomes.
+2. Select fields with findings. Confirm wrong entity, reporting-period, conflicting-evidence, missed-evidence, and unsupported-derivation findings appear without changing the selected proposal shown beneath the report.
+3. Run verification again on the unchanged revision. Confirm the same immutable report is reused. Create a new Fill Plan revision and confirm it does not inherit the old revision's result.
+4. For a missed fact, confirm the report identifies additional frozen evidence but leaves the target unresolved; it must not remap or start an automated mapper/verifier debate.
+5. Run `uv run python -m scripts.evaluate_phase4`. The controlled gate must report full injected-error detection, zero clean-case false rejection, and `selection_unchanged: true` for every case.
+6. Run all automated commands above. Stop here for Phase 4 approval; no human approval decisions or regenerated outputs exist yet.
 
 ## Manual Phase 3 acceptance walkthrough
 

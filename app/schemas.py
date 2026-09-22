@@ -52,6 +52,7 @@ class TemplateField(BaseModel):
     widgets: list[Location] = Field(default_factory=list)
     widget_count: int = Field(default=1, ge=1)
     widget_options: list[WidgetOption] = Field(default_factory=list)
+    constraints: dict[str, Any] = Field(default_factory=dict)
 
 
 class RepeatingGroup(BaseModel):
@@ -258,3 +259,20 @@ class FillPlanResponse(FillPlanSummary):
     mapper_version: str
     payload_sha256: str
     payload: dict[str, Any]
+
+
+class VerificationReportResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    fill_plan_revision_id: str
+    fill_plan_revision: int
+    status: Literal["pass", "fail", "needs_review"]
+    deterministic_version: str
+    verifier_version: str
+    provider: str
+    model: str | None
+    input_sha256: str
+    report_sha256: str
+    report: dict[str, Any]
+    created_at: datetime

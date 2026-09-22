@@ -109,3 +109,18 @@ header { height: 74px; border-bottom: 1px solid var(--line); display: flex; alig
 .empty-candidates { font-size: 10px; line-height: 1.5; color: #73766e; padding: 12px; border: 1px dashed #c8c7c0; border-radius: 6px; }
 .derivation-card { display: grid; gap: 4px; padding: 9px; background: #e8edf0; border-radius: 5px; font: 8px "DM Mono"; color: #53626b; }
 .derivation-card strong { font-size: 10px; }
+.verification-summary { margin: 14px 14px 0; padding: 12px; border: 1px solid #c9d4ca; border-radius: 7px; background: #f3f7f1; }
+.verification-summary.fail { border-color: #dfb8ab; background: #fff4ef; }
+.verification-summary.needs_review { border-color: #dfc59c; background: #fff9ee; }
+.verification-heading { display: flex; justify-content: space-between; gap: 8px; align-items: center; font: 8px "DM Mono"; text-transform: uppercase; }
+.verification-heading span { display: flex; align-items: center; gap: 5px; }
+.verification-heading strong { padding: 4px 6px; border-radius: 99px; background: #dce9d8; color: #31543a; }
+.verification-summary.fail .verification-heading strong { background: #f4d9d0; color: #8a3927; }
+.verification-stages { display: flex; gap: 5px; margin: 9px 0; }
+.verification-stages span { font: 7px "DM Mono"; padding: 4px 5px; background: #e8e8e2; border-radius: 3px; }
+.verification-finding { display: flex; gap: 6px; padding: 7px 0; border-top: 1px solid #ddd9cd; font-size: 9px; line-height: 1.35; }
+.verification-finding svg { flex: 0 0 auto; }
+.verification-finding strong { display: block; text-transform: capitalize; }
+.verification-finding.blocker { color: #913d2b; }
+.verification-finding.review { color: #87522e; }
+.verification-summary > small { display: block; margin-top: 7px; font: 7px "DM Mono"; color: #777a72; }
