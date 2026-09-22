@@ -14,7 +14,7 @@ from app.model_gateway import ModelGateway
 MAPPER_VERSION = "deterministic-mapper-v1"
 MODEL_MAPPER_VERSION = "model-mapper-v3-full-context"
 MAPPING_PROMPT_VERSION = "full-evidence-template-values-v3"
-MAPPING_SCHEMA_VERSION = "target-values-with-provenance-v3"
+MAPPING_SCHEMA_VERSION = "target-values-with-provenance-v4"
 ROLE_WORDS = {"applicant", "business", "driver", "vehicle", "broker", "owner", "agency"}
 ROLE_ORDER = ("applicant", "business", "driver", "vehicle", "broker", "owner", "agency")
 AGENCY_SNAPSHOT_ID = "agency-registry"
@@ -30,12 +30,15 @@ class ModelTransformation(BaseModel):
     component: Literal["street", "city", "state", "postal_code"] | None = None
 
 
+ModelValue = str | int | float | bool
+
+
 class ModelMappingProposal(BaseModel):
     target_field_id: str
     evidence_fact_ids: list[str] = Field(default_factory=list)
     source_block_ids: list[str] = Field(default_factory=list)
-    canonical_value: Any | None = None
-    native_write_value: Any | None = None
+    canonical_value: ModelValue | None = None
+    native_write_value: ModelValue | None = None
     confidence: float | None = None
     transformation: ModelTransformation | None = None
     rationale: str = ""
