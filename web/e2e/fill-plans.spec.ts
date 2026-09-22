@@ -33,9 +33,9 @@ test("shows frozen evidence, target overlay, alternatives, and unresolved issues
   }] }));
   await page.goto("/fill-plans/plan-1");
   await expect(page.getByText(/Evidence frozen/)).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Needs review" })).toBeVisible();
-  await expect(page.getByText("Amina", { exact: true })).toBeVisible();
-  await expect(page.getByText("Amira", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Resolve exception" })).toBeVisible();
+  await expect(page.getByText("Amina", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Amira", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Multiple similarly matched facts have different values")).toBeVisible();
   await expect(page.getByText("Page 1 · [0.1, 0.2, 0.4, 0.3]", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Verification · revision 1")).toBeVisible();

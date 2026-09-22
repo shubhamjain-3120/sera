@@ -85,24 +85,17 @@ hash-addressed, and the object graph in `app/models.py` mirrors the pipeline dir
    fill plans for that case. `case_key` is the evidence isolation boundary — it is what keeps one client's
    documents out of another's fill plan — and is derived per upload batch by `new_case_key`, not chosen from
    a fixed list.
-4. **Mapping** — no LLM is involved anywhere in this pipeline today; `deterministic-mapper-v1` is token
-   overlap plus `difflib` string similarity, and the "independent" verifier in step 5 reuses that same
-   matching logic. The Model Gateway the plan describes (`docs/IMPLEMENTATION_PLAN.md:68`) does not exist.
-   `app/mapping.py` (`build_fill_plan`) deterministically matches template fields against
-   evidence facts from `app/evidence/retrieve.py` candidate pools (semantic type, entity role, token/string
-   similarity, exact-choice matching, typed normalization), producing scored candidates per target field.
-   Nothing is silently auto-selected when ambiguous; unresolved/blocked targets carry explicit issues.
-   Grounded derivations (max depth 2, cycle-rejected) are supported but model-generated code is never
-   executed. Results are stored as an immutable `FillPlanRevision`; editing selections (`revise_fill_plan`)
-   creates a new revision rather than mutating the old one — verification reports pin to one exact revision
-   and are never reused across a revision change. Agency details (`app/agencies.py`) are injected as a
-   second, non-document fact source with `entity_role: "agency"` and `origin: "agency"`; role gating via
-   `ROLE_WORDS` is what stops an agency address from scoring against an applicant or driver address.
-5. **Verification** — `app/verification.py` runs `deterministic_validate` (structural/type/choice/provenance/
-   derivation-depth/repeating-capacity checks, no model involved) followed by `EvidenceAwareVerifier`, an
-   independent model-based pass that can only flag findings (wrong entity, unsupported value, conflicting
-   evidence, missed evidence) — it has no code path that can alter a selected value. Both run before a
-   `VerificationReport` is persisted, hash-pinned to the fill plan revision and evidence bundle.
+4. **Mapping** — `app/mapping.py` (`build_model_fill_plan`) sends every frozen evidence text block and the
+   complete template field descriptions to one model call, along with all extracted facts and agency facts.
+   The model proposes field values and source citations without a server-built shortlist. The server checks
+   provenance, type, native write constraints, forbidden fields, and review conditions before placing values
+   in the Fill Plan preview. Low-confidence, ambiguous, or period-missing evidence is presented for review.
+   Results are stored as immutable `FillPlanRevision` records. Agency details (`app/agencies.py`) remain a
+   separate non-document fact source.
+5. **Validation** — `app/verification.py` contains deterministic validation only. New Fill Plan runs do not
+   invoke a separate AI verifier or create new verification reports. Historical `VerificationReport` rows
+   remain in the database. Editing selections (`revise_fill_plan`) creates a new revision rather than
+   mutating the old one.
 
 Versioning/immutability pattern used throughout: mutable draft → `expected_revision`-guarded update →
 immutable published/frozen entity, each identified by a canonical-JSON SHA-256 hash (`json.dumps(...,

@@ -13,8 +13,10 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Session as OrmSession
 
 from app.db import Base
 
@@ -82,6 +84,42 @@ class ProcessingRun(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     artifact: Mapped[Artifact] = relationship()
+
+
+class ModelExecution(Base):
+    """Append-only trace for one model gateway request, including failures."""
+
+    __tablename__ = "model_executions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("processing_runs.id"), nullable=True, index=True)
+    stage: Mapped[str] = mapped_column(String(64), index=True)
+    input_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    output_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    output_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    provider: Mapped[str] = mapped_column(String(32), default="openai")
+    model: Mapped[str] = mapped_column(String(128))
+    reasoning_effort: Mapped[str] = mapped_column(String(32))
+    prompt_version: Mapped[str] = mapped_column(String(64))
+    schema_version: Mapped[str] = mapped_column(String(64))
+    response_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    duration_ms: Mapped[int] = mapped_column(Integer)
+    usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    refusal: Mapped[str | None] = mapped_column(Text, nullable=True)
+    incomplete_details: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+@event.listens_for(OrmSession, "before_flush")
+def _model_executions_are_append_only(session: OrmSession, _flush_context: Any, _instances: Any) -> None:
+    for execution in session.dirty:
+        if isinstance(execution, ModelExecution) and session.is_modified(execution, include_collections=True):
+            raise ValueError("ModelExecution records are immutable")
+    for execution in session.deleted:
+        if isinstance(execution, ModelExecution):
+            raise ValueError("ModelExecution records are immutable")
 
 
 class TemplateDraft(Base):
@@ -163,12 +201,17 @@ class FillPlan(Base):
         # Agency details feed values into the plan, so the same template and
         # evidence filed for a different agency is a different Fill Plan.
         UniqueConstraint(
-            "template_version_id", "evidence_bundle_id", "agency_key", name="uq_fill_plan_inputs"
+            "template_version_id",
+            "evidence_bundle_id",
+            "agency_key",
+            "mapping_profile_hash",
+            name="uq_fill_plan_inputs",
         ),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     case_key: Mapped[str] = mapped_column(String(64), index=True)
     agency_key: Mapped[str] = mapped_column(String(64), index=True)
+    mapping_profile_hash: Mapped[str] = mapped_column(String(64), default="legacy-profile-v1", index=True)
     template_version_id: Mapped[str] = mapped_column(
         ForeignKey("template_versions.id"), index=True
     )

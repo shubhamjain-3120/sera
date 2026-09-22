@@ -1,4 +1,4 @@
-import type { Agency, Artifact, CaseSummary, Draft, EvidenceSnapshot, EvidenceSource, FillPlan, FillPlanSummary, ReviewAction, ReviewDecision, Run, TemplateSchema, TemplateVersion, VerificationReport } from "./types";
+import type { Agency, Artifact, CaseSummary, Draft, EvidenceSnapshot, EvidenceSource, FillPlan, FillPlanSummary, ReviewAction, ReviewDecision, Run, TemplateSchema, TemplateVersion } from "./types";
 
 export const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -43,8 +43,9 @@ export const api = {
   versions: (draftId: string) => request<TemplateVersion[]>(`/api/v1/templates/${draftId}/versions`),
   listFillPlans: () => request<FillPlanSummary[]>("/api/v1/fill-plans"),
   fillPlan: (id: string) => request<FillPlan>(`/api/v1/fill-plans/${id}`),
+  deleteFillPlan: (id: string) => request<{ id: string }>(`/api/v1/fill-plans/${id}`, { method: "DELETE" }),
   createFillPlan: (caseKey: string, templateVersionId: string, agencyKey: string) =>
-    request<FillPlan>("/api/v1/fill-plans", {
+    request<Run>("/api/v1/fill-plans", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ case_key: caseKey, template_version_id: templateVersionId, agency_key: agencyKey }),
@@ -57,8 +58,6 @@ export const api = {
       body: JSON.stringify({ details }),
     }),
   listCases: () => request<CaseSummary[]>("/api/v1/cases"),
-  listVerifications: (fillPlanId: string) => request<VerificationReport[]>(`/api/v1/fill-plans/${fillPlanId}/verifications`),
-  verifyFillPlan: (fillPlanId: string, revision: number) => request<VerificationReport>(`/api/v1/fill-plans/${fillPlanId}/verifications?revision=${revision}`, { method: "POST" }),
   listReviewDecisions: (fillPlanId: string) => request<ReviewDecision[]>(`/api/v1/fill-plans/${fillPlanId}/review-decisions`),
   reviewFillPlan: (fillPlanId: string, input: { expected_revision: number; target_field_id: string; action: ReviewAction; actor: string; reason?: string; candidate_id?: string; value?: unknown }) =>
     request<ReviewDecision>(`/api/v1/fill-plans/${fillPlanId}/review-decisions`, {

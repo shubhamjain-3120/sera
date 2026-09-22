@@ -1,9 +1,28 @@
 import copy
 import hashlib
+import re
+from datetime import date, datetime
 from typing import Any
+
+from app.mapping import format_write_value, validate_write_value
 
 REVIEW_VERSION = "human-review-v1"
 EXCEPTION_ACTIONS = {"clear", "not_applicable", "intentional_blank"}
+
+
+def _canonical_date(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    for pattern in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%d/%m/%Y", "%d/%m/%y"):
+        try:
+            return datetime.strptime(text, pattern).date().isoformat()
+        except ValueError:
+            continue
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        return None
 
 
 def selected_candidate(target: dict[str, Any]) -> dict[str, Any] | None:
@@ -56,6 +75,16 @@ def _human_candidate(
 
 def _coerce_and_validate(field: dict[str, Any], value: Any) -> Any:
     field_type = field.get("field_type", "unknown")
+    constraints = field.get("constraints") or {}
+    if (field_type == "date" or constraints.get("format_hint") == "date") and value not in (None, ""):
+        if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            raise ValueError("Human edit for a date field must be an ISO date (YYYY-MM-DD)")
+        from datetime import date
+
+        try:
+            date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("Human edit for a date field must be a valid ISO date") from exc
     if field_type == "number":
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError("Human edit for a number field must be numeric")
@@ -161,6 +190,11 @@ def apply_review_decision(
         value = field.get("current_value")
         if value is None or value == "":
             raise ValueError("This target has no prefilled value to retain")
+        if (field.get("constraints") or {}).get("format_hint") == "date":
+            canonical_date = _canonical_date(value)
+            if canonical_date is None:
+                raise ValueError("The prefilled date cannot be safely retained; edit it as an ISO date")
+            value = canonical_date
     elif action == "clear":
         value = None
     elif action == "intentional_blank":
@@ -185,6 +219,33 @@ def apply_review_decision(
         prefilled_disposition = None
 
     human_candidate = _human_candidate(target, decision_id, value, action, selected)
+    human_candidate["canonical_value"] = value
+    human_candidate["mapping_method"] = "human"
+    human_candidate["approval_state"] = "human_approved"
+    if action in EXCEPTION_ACTIONS:
+        human_candidate["write_value"] = value
+    elif action == "retain_prefilled" and (field.get("constraints") or {}).get("format_hint") == "date":
+        # The stored PDF text is already in the target's native date format;
+        # retain those exact bytes while exposing an ISO canonical value.
+        human_candidate["write_value"] = field.get("current_value")
+    else:
+        format_field = dict(field)
+        if (field.get("constraints") or {}).get("format_hint") == "date":
+            format_field["field_type"] = "date"
+        try:
+            write_value = format_write_value(format_field, value)
+        except ValueError as exc:
+            raise ValueError(f"Human edit cannot be written to this target: {exc}") from exc
+        issues = validate_write_value(
+            format_field,
+            value,
+            write_value,
+            allow_blank=action in {"clear", "intentional_blank"},
+            allow_exception=action == "not_applicable",
+        )
+        if issues:
+            raise ValueError("Human edit violates target constraints: " + "; ".join(issues))
+        human_candidate["write_value"] = write_value
     target.setdefault("candidates", []).append(human_candidate)
     target["selected_candidate_id"] = human_candidate["id"]
     target["state"] = "reviewed"

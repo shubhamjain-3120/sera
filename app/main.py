@@ -1,3 +1,5 @@
+import hashlib
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
@@ -24,6 +26,7 @@ from app.models import (
     FillPlanRevision,
     ProcessingRun,
     ReviewDecision,
+    RunStatus,
     TemplateDraft,
     TemplateVersion,
     VerificationReport,
@@ -45,21 +48,21 @@ from app.schemas import (
     ReviewDecisionCreate,
     ReviewDecisionResponse,
     RunResponse,
-    VerificationReportResponse,
     VersionResponse,
 )
 from app.services import (
     RevisionConflict,
-    create_fill_plan,
+    fill_plan_profile_identity,
     ingest_evidence,
     inspect_artifact,
     new_case_key,
     publish_draft,
+    resolve_agency,
     review_fill_plan,
     revise_fill_plan,
+    run_fill_plan_job,
     seed_agencies,
     update_draft,
-    verify_fill_plan_revision,
 )
 from app.storage import get_storage
 
@@ -96,6 +99,11 @@ def inspect_artifact_background(run_id: str) -> None:
 def ingest_evidence_background(run_id: str) -> None:
     with SessionLocal() as session:
         ingest_evidence(session, get_storage(), run_id)
+
+
+def fill_plan_background(run_id: str) -> None:
+    with SessionLocal() as session:
+        run_fill_plan_job(session, run_id)
 
 
 def _run_response(run: ProcessingRun) -> RunResponse:
@@ -488,18 +496,75 @@ def _fill_plan_response(db: Session, fill_plan: FillPlan) -> FillPlanResponse:
     )
 
 
-@app.post("/api/v1/fill-plans", response_model=FillPlanResponse, status_code=201)
-def post_fill_plan(request: FillPlanCreate, db: Db) -> FillPlanResponse:
+@app.post("/api/v1/fill-plans", response_model=RunResponse, status_code=202)
+def post_fill_plan(background: BackgroundTasks, request: FillPlanCreate, db: Db) -> RunResponse:
     version = db.get(TemplateVersion, request.template_version_id)
     if version is None:
         raise HTTPException(404, "Published template version not found")
-    try:
-        fill_plan = create_fill_plan(
-            db, request.case_key, version, request.evidence_snapshot_ids, request.agency_key
+    draft = db.get(TemplateDraft, version.draft_id)
+    if draft is None:
+        raise HTTPException(409, "Published template no longer has a draft")
+    latest = db.scalar(
+        select(TemplateVersion)
+        .where(TemplateVersion.draft_id == draft.id)
+        .order_by(TemplateVersion.version.desc())
+        .limit(1)
+    )
+    if latest is None or latest.id != version.id:
+        raise HTTPException(409, "Select the latest published template version")
+    if draft.revision != version.source_revision:
+        raise HTTPException(
+            409,
+            "Template draft has unpublished changes; publish the current draft before creating a Fill Plan",
         )
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    return _fill_plan_response(db, fill_plan)
+    agency = resolve_agency(db, request.agency_key)
+    profile_hash, _mapping_hash = fill_plan_profile_identity(db, agency.key)
+    material = {
+        "case_key": request.case_key,
+        "template_version_id": version.id,
+        "evidence_snapshot_ids": sorted(request.evidence_snapshot_ids or []),
+        "agency_key": agency.key,
+    }
+    body_hash = hashlib.sha256(
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    request_fingerprint = hashlib.sha256(f"{body_hash}:{profile_hash}".encode()).hexdigest()
+    idempotency = request.idempotency_key or f"auto:{request_fingerprint}"
+    target_artifact_id = draft.artifact_id
+    existing_runs = db.scalars(
+        select(ProcessingRun)
+        .where(ProcessingRun.artifact_id == target_artifact_id)
+        .order_by(ProcessingRun.created_at.desc())
+    ).all()
+    for existing in existing_runs:
+        config = existing.config_snapshot or {}
+        if config.get("operation") != "fill_plan" or config.get("idempotency_key") != idempotency:
+            continue
+        if config.get("request_hash") != request_fingerprint:
+            raise HTTPException(409, "Idempotency key was already used with different Fill Plan inputs")
+        # Return an in-flight or completed result unchanged. An implicit key
+        # gets a fresh run after failure, making a user retry straightforward.
+        if existing.status != RunStatus.FAILED or request.idempotency_key:
+            return _run_response(existing)
+        break
+    run = ProcessingRun(
+        artifact_id=target_artifact_id,
+        provider="openai",
+        stage="queued",
+        config_snapshot={
+            "operation": "fill_plan",
+            "request_hash": request_fingerprint,
+            "idempotency_key": idempotency,
+            "mapping_profile_hash": profile_hash,
+            **material,
+            "evidence_snapshot_ids": request.evidence_snapshot_ids,
+        },
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    background.add_task(fill_plan_background, run.id)
+    return _run_response(run)
 
 
 @app.get("/api/v1/fill-plans", response_model=list[FillPlanSummary])
@@ -517,6 +582,47 @@ def get_fill_plan(fill_plan_id: str, db: Db) -> FillPlanResponse:
     if fill_plan is None:
         raise HTTPException(404, "Fill Plan not found")
     return _fill_plan_response(db, fill_plan)
+
+
+@app.delete("/api/v1/fill-plans/{fill_plan_id}")
+def delete_fill_plan(fill_plan_id: str, db: Db) -> dict[str, str]:
+    """Delete a Fill Plan and its derived review artifacts.
+
+    ModelExecution rows are deliberately not attached to this deletion tree;
+    they remain the append-only audit trail for model gateway calls.
+    """
+    fill_plan = db.get(FillPlan, fill_plan_id)
+    if fill_plan is None:
+        raise HTTPException(404, "Fill Plan not found")
+
+    revisions = db.scalars(
+        select(FillPlanRevision).where(FillPlanRevision.fill_plan_id == fill_plan_id)
+    ).all()
+    revision_ids = [revision.id for revision in revisions]
+    decisions = db.scalars(
+        select(ReviewDecision).where(ReviewDecision.fill_plan_id == fill_plan_id)
+    ).all()
+    reports = (
+        db.scalars(
+            select(VerificationReport).where(
+                VerificationReport.fill_plan_revision_id.in_(revision_ids)
+            )
+        ).all()
+        if revision_ids
+        else []
+    )
+
+    # Delete dependants explicitly because the schema intentionally does not
+    # cascade immutable revision and audit records.
+    for decision in decisions:
+        db.delete(decision)
+    for report in reports:
+        db.delete(report)
+    for revision in revisions:
+        db.delete(revision)
+    db.delete(fill_plan)
+    db.commit()
+    return {"id": fill_plan_id}
 
 
 @app.put("/api/v1/fill-plans/{fill_plan_id}", response_model=FillPlanResponse)
@@ -537,61 +643,6 @@ def put_fill_plan(fill_plan_id: str, update: FillPlanUpdate, db: Db) -> FillPlan
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return _fill_plan_response(db, fill_plan)
-
-
-def _verification_response(db: Session, report: VerificationReport) -> VerificationReportResponse:
-    revision = db.get(FillPlanRevision, report.fill_plan_revision_id)
-    if revision is None:
-        raise HTTPException(500, "Verification report revision is missing")
-    return VerificationReportResponse(
-        id=report.id,
-        fill_plan_revision_id=report.fill_plan_revision_id,
-        fill_plan_revision=revision.revision,
-        status=report.status,
-        deterministic_version=report.deterministic_version,
-        verifier_version=report.verifier_version,
-        provider=report.provider,
-        model=report.model,
-        input_sha256=report.input_sha256,
-        report_sha256=report.report_sha256,
-        report=report.report,
-        created_at=report.created_at,
-    )
-
-
-@app.post(
-    "/api/v1/fill-plans/{fill_plan_id}/verifications",
-    response_model=VerificationReportResponse,
-    status_code=201,
-)
-def post_verification(
-    fill_plan_id: str, db: Db, revision: int | None = Query(default=None, ge=1)
-) -> VerificationReportResponse:
-    fill_plan = db.get(FillPlan, fill_plan_id)
-    if fill_plan is None:
-        raise HTTPException(404, "Fill Plan not found")
-    try:
-        report = verify_fill_plan_revision(db, fill_plan, revision)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    return _verification_response(db, report)
-
-
-@app.get(
-    "/api/v1/fill-plans/{fill_plan_id}/verifications",
-    response_model=list[VerificationReportResponse],
-)
-def list_verifications(fill_plan_id: str, db: Db) -> list[VerificationReportResponse]:
-    fill_plan = db.get(FillPlan, fill_plan_id)
-    if fill_plan is None:
-        raise HTTPException(404, "Fill Plan not found")
-    reports = db.scalars(
-        select(VerificationReport)
-        .join(FillPlanRevision)
-        .where(FillPlanRevision.fill_plan_id == fill_plan_id)
-        .order_by(FillPlanRevision.revision.desc(), VerificationReport.created_at.desc())
-    ).all()
-    return [_verification_response(db, report) for report in reports]
 
 
 def _review_response(db: Session, decision: ReviewDecision) -> ReviewDecisionResponse:

@@ -4,7 +4,7 @@ test("shows isolated evidence ingestion controls", async ({ page }) => {
   await page.route("**/api/v1/evidence/sources", (route) => route.fulfill({ json: [] }));
   await page.goto("/evidence");
   await expect(page.getByRole("heading", { name: /Trace every fact/ })).toBeVisible();
-  await expect(page.getByLabel("Case")).toHaveValue("case-1");
+  await expect(page.getByText("Next upload starts a new case")).toBeVisible();
   await expect(page.getByRole("button", { name: /Add source/ })).toBeVisible();
   await expect(page.getByText(/Filled reference outputs are rejected/)).toBeVisible();
 });
@@ -28,7 +28,7 @@ test("navigates an evidence fact to its exact source region", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Accepted fact" })).toBeVisible();
   await expect(page.getByText(/No value.*explicitly absent/i)).toBeVisible();
   await expect(page.getByText("Page 1 · [44, 68, 280, 98]", { exact: true })).toBeVisible();
-  await expect(page.locator("button.pdf-field", { hasText: "" })).toHaveAttribute("aria-label", "Given name");
+  await expect(page.locator("button.pdf-field", { hasText: "" })).toHaveAttribute("aria-label", "Given name, location 1");
 });
 
 test("renders Reducto normalized top-left geometry as a visible highlight", async ({ page }) => {

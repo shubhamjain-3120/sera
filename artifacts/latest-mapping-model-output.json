@@ -1,0 +1,218 @@
+{
+  "execution": {
+    "id": "835ea38a-fece-4c0d-8587-c3a4d11fb314",
+    "run_id": "33ee897e-b5e9-49e6-abe4-e3cd57af3f2c",
+    "created_at": "2026-09-22T22:38:38.485170",
+    "stage": "mapping",
+    "provider": "openai",
+    "model": "gpt-6-luna",
+    "reasoning_effort": "high",
+    "prompt_version": "shortlist-links-v2",
+    "schema_version": "target-fact-links-v2",
+    "response_id": "resp_0f9ccd37ca4d3a23016ab30353752887d194d33dfa109009cf",
+    "input_sha256": "213e3da1ac63248f0060f9797c45ef0e9f4826286e42e502b9db4ed7c38837ab",
+    "output_sha256": "6ba1420798288e795a0c65d05b1e22a98395adee5a442cfbb0059ba20d98e2c5",
+    "usage": {
+      "input_tokens": 22322,
+      "input_tokens_details": {
+        "cache_write_tokens": 22319,
+        "cached_tokens": 0
+      },
+      "output_tokens": 3454,
+      "output_tokens_details": {
+        "reasoning_tokens": 2283
+      },
+      "total_tokens": 25776
+    },
+    "error": null
+  },
+  "output": {
+    "proposals": [
+      {
+        "target_field_id": "6e0ea5369ffa18b0",
+        "evidence_fact_ids": [
+          "b92932cc100fbbc1d50d"
+        ],
+        "transformation": null,
+        "rationale": "The business company-name fact is the most relevant evidence for the insured name."
+      },
+      {
+        "target_field_id": "b7ef68f5a763e028",
+        "evidence_fact_ids": [
+          "agency:js-truck:legal_name"
+        ],
+        "transformation": null,
+        "rationale": "Agency legal name supports the agency name target."
+      },
+      {
+        "target_field_id": "de2879f18edd7555",
+        "evidence_fact_ids": [
+          "f571a8c9d02f6dad581f"
+        ],
+        "transformation": null,
+        "rationale": "The EIN fact supports the FEIN target; EIN and FEIN are equivalent."
+      },
+      {
+        "target_field_id": "0bcb4ba5e1cc4e2a",
+        "evidence_fact_ids": [
+          "193a1eaf43febecacc90"
+        ],
+        "transformation": {
+          "operation": "address_component",
+          "component": "street"
+        },
+        "rationale": "Split the located business address into its street component for the mailing address target."
+      },
+      {
+        "target_field_id": "228f0e09efd764f4",
+        "evidence_fact_ids": [
+          "193a1eaf43febecacc90"
+        ],
+        "transformation": {
+          "operation": "address_component",
+          "component": "city"
+        },
+        "rationale": "Split the located business address into its city component for the mailing address target."
+      },
+      {
+        "target_field_id": "f751dad3f5ead330",
+        "evidence_fact_ids": [
+          "193a1eaf43febecacc90"
+        ],
+        "transformation": {
+          "operation": "address_component",
+          "component": "state"
+        },
+        "rationale": "Split the located business address into its state component for the mailing address target."
+      },
+      {
+        "target_field_id": "ad83c9b43111261d",
+        "evidence_fact_ids": [
+          "193a1eaf43febecacc90"
+        ],
+        "transformation": {
+          "operation": "address_component",
+          "component": "postal_code"
+        },
+        "rationale": "Split the located business address into its postal-code component for the mailing address target."
+      },
+      {
+        "target_field_id": "1084f872e0dfcdc9",
+        "evidence_fact_ids": [
+          "008cb86fbe298c108b7c"
+        ],
+        "transformation": null,
+        "rationale": "The company type fact supports this target."
+      },
+      {
+        "target_field_id": "2df303a34afec5bd",
+        "evidence_fact_ids": [
+          "462abe4cc55e5b8d3e69"
+        ],
+        "transformation": {
+          "operation": "address_component",
+          "component": "street"
+        },
+        "rationale": "Split the located garaging address into its street component."
+      },
+      {
+        "target_field_id": "313c55cace51ae3a",
+        "evidence_fact_ids": [
+          "462abe4cc55e5b8d3e69"
+        ],
+        "transformation": {
+          "operation": "address_component",
+          "component": "city"
+        },
+        "rationale": "Split the located garaging address into its city component."
+      },
+      {
+        "target_field_id": "62f90edb083deb30",
+        "evidence_fact_ids": [
+          "462abe4cc55e5b8d3e69"
+        ],
+        "transformation": {
+          "operation": "address_component",
+          "component": "state"
+        },
+        "rationale": "Split the located garaging address into its state component."
+      },
+      {
+        "target_field_id": "9a0965361e87e3dc",
+        "evidence_fact_ids": [
+          "462abe4cc55e5b8d3e69"
+        ],
+        "transformation": {
+          "operation": "address_component",
+          "component": "postal_code"
+        },
+        "rationale": "Split the located garaging address into its postal-code component."
+      },
+      {
+        "target_field_id": "d2ca4916fb7f04fa",
+        "evidence_fact_ids": [
+          "7afd2fd87cc0b6f0c1f2"
+        ],
+        "transformation": null,
+        "rationale": "The gross sales fact can support a current-year revenue review suggestion because it is the only located sales amount; its period is unstated."
+      },
+      {
+        "target_field_id": "aa6ff4e7ca2cc812",
+        "evidence_fact_ids": [
+          "c4eb159a9a4a0dde736b"
+        ],
+        "transformation": {
+          "operation": "count_records",
+          "component": null
+        },
+        "rationale": "One driver-name record is located. Suggest a current-year driver count for review."
+      },
+      {
+        "target_field_id": "4e968e4f2979aa25",
+        "evidence_fact_ids": [
+          "a85b8524c7ed69e83972"
+        ],
+        "transformation": null,
+        "rationale": "The operating-radius fact is relevant, but its distance unit is unstated; retain for review."
+      },
+      {
+        "target_field_id": "ca6ffa266ecbd7f4",
+        "evidence_fact_ids": [
+          "1db206acb1dc5b362c7a"
+        ],
+        "transformation": {
+          "operation": "coverage_control",
+          "component": null
+        },
+        "rationale": "The auto liability limit supports the corresponding auto liability yes/no control."
+      },
+      {
+        "target_field_id": "333102577eac6099",
+        "evidence_fact_ids": [
+          "1db206acb1dc5b362c7a"
+        ],
+        "transformation": null,
+        "rationale": "The auto liability limit fact supports the matching auto liability limit target."
+      },
+      {
+        "target_field_id": "5b999199ad3eef69",
+        "evidence_fact_ids": [
+          "ff1ad3942438d49e83a2"
+        ],
+        "transformation": {
+          "operation": "coverage_control",
+          "component": null
+        },
+        "rationale": "The motor cargo limit supports the corresponding cargo yes/no control."
+      },
+      {
+        "target_field_id": "91ecb861bd4b1d22",
+        "evidence_fact_ids": [
+          "ff1ad3942438d49e83a2"
+        ],
+        "transformation": null,
+        "rationale": "The motor cargo limit fact supports the matching cargo limit target."
+      }
+    ]
+  }
+}

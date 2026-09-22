@@ -23,7 +23,10 @@ export interface TemplateField {
   writable: boolean;
   location: Location;
   native_name?: string | null;
+  native_full_name?: string | null;
+  native_object_id?: string | null;
   options: string[];
+  choice_options?: Array<{ export_value: string; display_value: string }>;
   current_value?: unknown;
   repeating_group_id?: string | null;
   notes?: string | null;
@@ -182,6 +185,8 @@ export interface MappingCandidate {
   entity_id?: string | null;
   entity_role?: string | null;
   value: unknown;
+  canonical_value?: unknown;
+  write_value?: unknown;
   raw_value: string;
   value_type: string;
   unit?: string | null;
@@ -189,6 +194,12 @@ export interface MappingCandidate {
   period_context?: string | null;
   origin: "evidence" | "derivation" | "human" | "agency";
   resolution: "direct" | "normalized" | "derived" | "human";
+  mapping_method?: string | null;
+  evidence_fact_ids?: string[];
+  evidence_sources?: Array<{ fact_id: string; snapshot_id: string; artifact_id: string }>;
+  approval_state?: "system_approved" | "needs_review" | "human_approved" | null;
+  auto_approval_reasons?: string[];
+  model_execution_id?: string | null;
   evidence_confidence: number;
   match_score: number;
   provenance: EvidenceLocation[];
@@ -283,37 +294,4 @@ export interface ReviewDecision {
   new_value: unknown;
   detail: Record<string, unknown>;
   created_at: string;
-}
-
-export interface VerificationFinding {
-  id: string;
-  source: "deterministic" | "verifier";
-  code: string;
-  severity: "info" | "review" | "blocker";
-  target_id?: string | null;
-  message: string;
-  evidence: EvidenceLocation[];
-}
-
-export interface VerificationReport {
-  id: string;
-  fill_plan_revision_id: string;
-  fill_plan_revision: number;
-  status: "pass" | "fail" | "needs_review";
-  deterministic_version: string;
-  verifier_version: string;
-  provider: string;
-  model?: string | null;
-  input_sha256: string;
-  report_sha256: string;
-  created_at: string;
-  report: {
-    status: "pass" | "fail" | "needs_review";
-    selection_unchanged: boolean;
-    selection_hash_before: string;
-    selection_hash_after: string;
-    deterministic: { version: string; status: "pass" | "fail"; findings: VerificationFinding[] };
-    independent: { version: string; status: "pass" | "fail" | "needs_review"; findings: VerificationFinding[]; additional_evidence: Array<{ target_id: string; snapshot_fact_id: string; value: unknown; confidence: number; provenance: EvidenceLocation[] }>; duration_ms: number };
-    trace: Record<string, unknown>;
-  };
 }

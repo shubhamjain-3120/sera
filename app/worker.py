@@ -2,7 +2,7 @@ from celery import Celery
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.services import ingest_evidence, inspect_artifact
+from app.services import ingest_evidence, inspect_artifact, run_fill_plan_job
 from app.storage import get_storage
 
 settings = get_settings()
@@ -19,3 +19,10 @@ def inspect_artifact_task(run_id: str) -> None:
 def ingest_evidence_task(run_id: str) -> None:
     with SessionLocal() as session:
         ingest_evidence(session, get_storage(), run_id)
+
+
+@celery_app.task(name="fill_plan", autoretry_for=(), max_retries=0)
+def fill_plan_task(run_id: str) -> None:
+    """Execute a queued model-backed plan; service persists failure state itself."""
+    with SessionLocal() as session:
+        run_fill_plan_job(session, run_id)

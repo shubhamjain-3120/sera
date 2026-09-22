@@ -127,3 +127,116 @@ def test_reducto_ocr_words_narrow_fact_provenance():
     name = next(fact for fact in snapshot["facts"] if fact["key"] == "name")
     assert name["provenance"][0]["rect"] == [0.297, 0.197, 0.503, 0.233]
     assert name["provenance"][0]["precision"] == "ocr_word_union"
+
+
+def test_model_evidence_resolves_stable_block_ids_to_server_locators():
+    from types import SimpleNamespace
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from sqlalchemy.pool import StaticPool
+
+    from app.evidence.extract import ModelEvidenceFact, ModelEvidenceOutput, extract_evidence_model
+    from app.model_gateway import ModelResult
+
+    class Gateway:
+        settings = SimpleNamespace(openai_reasoning_effort="high")
+
+        def run(self, stage, input_data, output_model, **kwargs):
+            assert stage == "evidence"
+            assert "source" not in input_data["blocks"][0]
+            block_id = input_data["blocks"][0]["block_id"]
+            output = ModelEvidenceOutput(
+                facts=[
+                    ModelEvidenceFact(
+                        label="Annual Revenue",
+                        key="business.annual_revenue",
+                        value=60000,
+                        raw_value="$60,000",
+                        value_type="currency",
+                        entity_id="business-1",
+                        entity_role="business",
+                        confidence=0.98,
+                        source_block_ids=[block_id],
+                    )
+                ]
+            )
+            kwargs["validate_output"](output)
+            return ModelResult(output, "trace-1", "gpt-6-luna", "evidence-v1", "facts-v1")
+
+    engine = create_engine("sqlite://", poolclass=StaticPool)
+    with Session(engine) as session:
+        snapshot = extract_evidence_model(
+            [
+                {
+                    "type": "text",
+                    "text": "Annual Revenue: $60,000",
+                    "source": {
+                        "kind": "pdf_rect",
+                        "page": 2,
+                        "rect": [0.1, 0.2, 0.3, 0.25],
+                        "coordinate_system": "normalized",
+                    },
+                }
+            ],
+            "artifact-1",
+            "a" * 64,
+            "recorded",
+            "recorded-v1",
+            session=session,
+            run_id="run-1",
+            gateway=Gateway(),
+        )
+    fact = snapshot["facts"][0]
+    assert fact["value"] == 60000
+    assert fact["source_block_ids"] == [snapshot["parse_blocks"][0]["block_id"]]
+    assert fact["provenance"][0]["page"] == 2
+    assert fact["model_extraction"]["execution_id"] == "trace-1"
+    assert snapshot["model_extraction"]["reasoning_effort"] == "high"
+
+
+def test_model_evidence_low_ocr_confidence_is_not_auto_accepted():
+    from types import SimpleNamespace
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from sqlalchemy.pool import StaticPool
+
+    from app.evidence.extract import ModelEvidenceFact, ModelEvidenceOutput, extract_evidence_model
+    from app.model_gateway import ModelResult
+
+    class Gateway:
+        settings = SimpleNamespace(openai_reasoning_effort="high")
+
+        def run(self, _stage, input_data, _output_model, **kwargs):
+            block_id = input_data["blocks"][0]["block_id"]
+            output = ModelEvidenceOutput(
+                facts=[
+                    ModelEvidenceFact(
+                        label="Phone",
+                        key="contact.phone",
+                        value="555-1212",
+                        confidence=0.99,
+                        source_block_ids=[block_id],
+                    )
+                ]
+            )
+            kwargs["validate_output"](output)
+            return ModelResult(output, "trace-low-ocr", "gpt-6-luna", "evidence-v1", "facts-v1")
+
+    engine = create_engine("sqlite://", poolclass=StaticPool)
+    with Session(engine) as session:
+        snapshot = extract_evidence_model(
+            [{"text": "Phone: 555-1212", "ocr_confidence": 0.62, "source": {"kind": "pdf_rect", "page": 1}}],
+            "artifact-1",
+            "a" * 64,
+            "reducto",
+            "reducto-v1",
+            session=session,
+            run_id="run-low-ocr",
+            gateway=Gateway(),
+        )
+    fact = snapshot["facts"][0]
+    assert fact["confidence"] == 0.62
+    assert fact["accepted"] is False
+    assert any("Low OCR confidence" in item for item in fact["uncertainty"])

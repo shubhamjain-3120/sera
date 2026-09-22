@@ -16,7 +16,7 @@ from app.models import (
 )
 from app.review import apply_review_decision
 from app.services import RevisionConflict, review_fill_plan, revise_fill_plan
-from app.verification import EvidenceAwareVerifier, deterministic_validate
+from app.verification import deterministic_validate
 
 
 def candidate(candidate_id: str, value: object, field_id: str = "name") -> dict:
@@ -100,6 +100,53 @@ def test_required_exception_needs_reason_and_records_human_authority():
     assert reviewed["state"] == "reviewed"
     assert audit["new_value"] == ""
     assert deterministic_validate(revised)["status"] == "pass"
+
+
+def test_human_date_edit_keeps_iso_canonical_and_formats_target_write_value():
+    date_target = target(
+        "effective-date",
+        "2026-01-01",
+        field_type="text",
+        constraints={"format_hint": "date", "date_format": "mm/dd/yy"},
+    )
+    revised, _audit = apply_review_decision(
+        payload(date_target),
+        decision_id="date-review",
+        target_field_id="effective-date",
+        action="edit",
+        actor="reviewer@example.test",
+        reason="Confirmed against the application",
+        candidate_id=None,
+        value="2026-07-14",
+    )
+    candidate = revised["targets"][0]["candidates"][-1]
+    assert candidate["value"] == "2026-07-14"
+    assert candidate["canonical_value"] == "2026-07-14"
+    assert candidate["write_value"] == "07/14/26"
+    assert candidate["approval_state"] == "human_approved"
+
+
+def test_retain_prefilled_date_preserves_native_write_text_and_iso_canonical():
+    date_target = target(
+        "effective-date",
+        None,
+        field_type="text",
+        current_value="07/14/26",
+        constraints={"format_hint": "date", "date_format": "mm/dd/yy"},
+    )
+    revised, _audit = apply_review_decision(
+        payload(date_target),
+        decision_id="retain-date",
+        target_field_id="effective-date",
+        action="retain_prefilled",
+        actor="reviewer@example.test",
+        reason="",
+        candidate_id=None,
+        value=None,
+    )
+    candidate = revised["targets"][0]["candidates"][-1]
+    assert candidate["canonical_value"] == "2026-07-14"
+    assert candidate["write_value"] == "07/14/26"
 
 
 def test_prefilled_disposition_is_explicit():
@@ -256,21 +303,3 @@ def test_decisions_persist_exact_revisions_and_stale_edits_fail():
         assert "terminal authority" in str(exc)
     else:
         raise AssertionError("mapper overwrote terminal human authority")
-
-
-def test_independent_verifier_skips_human_decisions():
-    reviewed, _ = apply_review_decision(
-        payload(target()),
-        decision_id="decision-6",
-        target_field_id="name",
-        action="edit",
-        actor="reviewer",
-        reason=None,
-        candidate_id=None,
-        value="Reviewer Value",
-    )
-    result = EvidenceAwareVerifier().verify(
-        reviewed,
-        [{"facts": [{"id": "fact", "key": "name", "value": "Different", "accepted": True}]}],
-    )
-    assert result["findings"] == []

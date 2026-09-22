@@ -70,3 +70,11 @@ def test_text_inside_widget_beats_neighboring_left_cell():
     enrich_fields([target], blocks)
     assert target["label"] == "Florist"
     assert target["label_evidence"][0]["relation"] == "field_text"
+
+
+def test_towing_services_percentage_uses_structural_label_and_semantic_type():
+    target = field("1", "text", [20, 20, 70, 35])
+    target["native_full_name"] = "Col4.16.1"
+    enrich_fields([target], [])
+    assert target["label"] == "Towing Services %"
+    assert target["semantic_type"] == "template.towing_services_percentage"

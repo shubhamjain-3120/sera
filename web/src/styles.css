@@ -85,6 +85,41 @@ button.ghost:hover { background: #0000000a; }
 .text-source { flex: 1; overflow: auto; padding: 45px; background: #fff; font: 13px/1.7 "DM Mono"; }
 .text-source p { margin: 0; padding: 6px 10px; border-left: 3px solid transparent; white-space: pre-wrap; }
 .text-source p.active { background: #eff8ca; border-left-color: #718637; }
+.text-source-block { display:block; width:100%; margin:0; padding:6px 10px; border:0; border-left:3px solid transparent; background:transparent; text-align:left; white-space:pre-wrap; font:inherit; cursor:pointer; }
+.text-source-block.active { background:#eff8ca; border-left-color:#718637; }
+.pdf-field.evidence-region { background:transparent; border:1px solid #608272; box-shadow:none; }
+.pdf-field.evidence-region.coarse { z-index:0; }
+.pdf-field.evidence-region.precise { z-index:1; }
+.pdf-field.evidence-region.active.precise { z-index:2; }
+.pdf-field.evidence-region:hover { background:#9dc4b033; }
+.pdf-field.evidence-region.active.precise { background:#d8f37a88; border-color:#62752a; box-shadow:0 0 0 2px #fff9; }
+.pdf-field.evidence-region.coarse { border-style:dashed; }
+.pdf-field.evidence-region.coarse.active { background:transparent; box-shadow:none; }
+.pdf-field.evidence-region.needs-review { border-color:#b07d2a; background:transparent; }
+.pdf-field.evidence-region.needs-review.active.precise { background:#f3c87a66; }
+.pdf-field.evidence-region.needs-review:hover { background:#f3c87a22; }
+.run-progress { display:grid; grid-template-columns:auto 1fr auto; gap:9px; align-items:center; margin-top:16px; padding:12px 14px; max-width:550px; border:1px solid var(--line); border-radius:8px; background:#f8f7f2; font-size:11px; }
+.run-progress progress { grid-column:2/4; width:100%; height:5px; accent-color:#63816b; }
+.template-version-card > div:nth-child(2) { flex:1; min-width:0; }
+.template-version-card small { display:block; margin-top:5px; font:9px/1.4 "DM Mono"; color:#73766e; }
+.template-version-card .stale-template { color:#98412e; }
+.template-version-card:disabled { opacity:.62; cursor:not-allowed; }
+.all-fields-toggle { border:1px solid var(--line); border-radius:99px; background:white; padding:5px 8px; color:#5d625c; font:8px "DM Mono"; cursor:pointer; }
+.all-fields-toggle[aria-pressed="true"] { background:#e6ebdf; border-color:#91a17e; }
+.queue-empty { padding:18px 12px; color:#73766e; font-size:10px; line-height:1.5; text-align:center; }
+.mapping-workbench .evidence-summary { align-items:center; flex-wrap:wrap; }
+.system-authority { display:flex; flex-direction:column; gap:5px; margin-bottom:12px; padding:12px; border:1px solid #a5b791; border-radius:6px; background:#edf2e7; color:#3f5c3c; }
+.system-authority strong { font-size:11px; }
+.system-authority span,.system-authority small { font:9px/1.5 "DM Mono"; }
+.approval-pill { flex-shrink:0; }
+.approval-pill.system_approved { background:#e1ecd6; color:#3d6537; }
+.approval-pill.human_approved { background:#e5e8ef; color:#495976; }
+.approval-pill.needs_review { background:#fff0cc; color:#815b18; }
+.value-audit { display:grid; gap:6px; margin:9px 0; }
+.value-audit > div { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:7px 8px; border-radius:4px; background:#f0efe9; }
+.value-audit span { color:#73766e; font:8px "DM Mono"; text-transform:uppercase; }
+.value-audit strong,.value-audit code { max-width:65%; overflow-wrap:anywhere; text-align:right; font:10px/1.4 "DM Mono"; }
+.candidate-facts { display:grid; gap:3px; }
 
 .fill-plan-hero:after { content: "03"; }
 .fill-plan-library { padding-bottom: 70px; }
@@ -123,21 +158,6 @@ button.ghost:hover { background: #0000000a; }
 .empty-candidates { font-size: 10px; line-height: 1.5; color: #73766e; padding: 12px; border: 1px dashed #c8c7c0; border-radius: 6px; }
 .derivation-card { display: grid; gap: 4px; padding: 9px; background: #e8edf0; border-radius: 5px; font: 8px "DM Mono"; color: #53626b; }
 .derivation-card strong { font-size: 10px; }
-.verification-summary { margin: 14px 14px 0; padding: 12px; border: 1px solid #c9d4ca; border-radius: 7px; background: #f3f7f1; }
-.verification-summary.fail { border-color: #dfb8ab; background: #fff4ef; }
-.verification-summary.needs_review { border-color: #dfc59c; background: #fff9ee; }
-.verification-heading { display: flex; justify-content: space-between; gap: 8px; align-items: center; font: 8px "DM Mono"; text-transform: uppercase; }
-.verification-heading span { display: flex; align-items: center; gap: 5px; }
-.verification-heading strong { padding: 4px 6px; border-radius: 99px; background: #dce9d8; color: #31543a; }
-.verification-summary.fail .verification-heading strong { background: #f4d9d0; color: #8a3927; }
-.verification-stages { display: flex; gap: 5px; margin: 9px 0; }
-.verification-stages span { font: 7px "DM Mono"; padding: 4px 5px; background: #e8e8e2; border-radius: 3px; }
-.verification-finding { display: flex; gap: 6px; padding: 7px 0; border-top: 1px solid #ddd9cd; font-size: 9px; line-height: 1.35; }
-.verification-finding svg { flex: 0 0 auto; }
-.verification-finding strong { display: block; text-transform: capitalize; }
-.verification-finding.blocker { color: #913d2b; }
-.verification-finding.review { color: #87522e; }
-.verification-summary > small { display: block; margin-top: 7px; font: 7px "DM Mono"; color: #777a72; }
 .pdf-field span { display: block; max-width: 100%; overflow: hidden; white-space: nowrap; font: 8px/1.2 "DM Sans"; color: #19352a; text-align: left; padding: 1px 2px; }
 .review-authority { display: grid; gap: 4px; padding: 10px; margin-bottom: 10px; border-radius: 6px; background: #e4eee5; color: #30523a; }
 .review-authority strong { font: 9px "DM Mono"; text-transform: uppercase; }.review-authority span { font-size: 10px; }.review-authority small { font: 8px/1.4 "DM Mono"; }

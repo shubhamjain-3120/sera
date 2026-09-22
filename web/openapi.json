@@ -743,12 +743,12 @@
           }
         },
         "responses": {
-          "201": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FillPlanResponse"
+                  "$ref": "#/components/schemas/RunResponse"
                 }
               }
             }
@@ -883,103 +883,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/FillPlanResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/fill-plans/{fill_plan_id}/verifications": {
-      "post": {
-        "summary": "Post Verification",
-        "operationId": "post_verification_api_v1_fill_plans__fill_plan_id__verifications_post",
-        "parameters": [
-          {
-            "name": "fill_plan_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Fill Plan Id"
-            }
-          },
-          {
-            "name": "revision",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Revision"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VerificationReportResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "List Verifications",
-        "operationId": "list_verifications_api_v1_fill_plans__fill_plan_id__verifications_get",
-        "parameters": [
-          {
-            "name": "fill_plan_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Fill Plan Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/VerificationReportResponse"
-                  },
-                  "title": "Response List Verifications Api V1 Fill Plans  Fill Plan Id  Verifications Get"
                 }
               }
             }
@@ -1261,6 +1164,25 @@
         ],
         "title": "CaseResponse"
       },
+      "ChoiceOption": {
+        "properties": {
+          "export_value": {
+            "type": "string",
+            "title": "Export Value"
+          },
+          "display_value": {
+            "type": "string",
+            "title": "Display Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "export_value",
+          "display_value"
+        ],
+        "title": "ChoiceOption",
+        "description": "Visible choice text and the value AcroForm expects when writing it."
+      },
       "DerivationSpec": {
         "properties": {
           "id": {
@@ -1429,6 +1351,25 @@
             },
             "type": "array",
             "title": "Provenance"
+          },
+          "source_block_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Block Ids"
+          },
+          "model_extraction": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Extraction"
           },
           "confidence": {
             "type": "number",
@@ -1745,6 +1686,34 @@
             "type": "array",
             "title": "Warnings"
           },
+          "unresolved": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Unresolved"
+          },
+          "document_instructions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Document Instructions"
+          },
+          "model_extraction": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Extraction"
+          },
           "source_sha256": {
             "type": "string",
             "title": "Source Sha256"
@@ -1926,6 +1895,19 @@
               }
             ],
             "title": "Agency Key"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
           }
         },
         "type": "object",
@@ -2705,12 +2687,41 @@
             ],
             "title": "Native Name"
           },
+          "native_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Native Full Name"
+          },
+          "native_object_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Native Object Id"
+          },
           "options": {
             "items": {
               "type": "string"
             },
             "type": "array",
             "title": "Options"
+          },
+          "choice_options": {
+            "items": {
+              "$ref": "#/components/schemas/ChoiceOption"
+            },
+            "type": "array",
+            "title": "Choice Options"
           },
           "current_value": {
             "title": "Current Value"
@@ -2903,88 +2914,6 @@
           "type"
         ],
         "title": "ValidationError"
-      },
-      "VerificationReportResponse": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "fill_plan_revision_id": {
-            "type": "string",
-            "title": "Fill Plan Revision Id"
-          },
-          "fill_plan_revision": {
-            "type": "integer",
-            "title": "Fill Plan Revision"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pass",
-              "fail",
-              "needs_review"
-            ],
-            "title": "Status"
-          },
-          "deterministic_version": {
-            "type": "string",
-            "title": "Deterministic Version"
-          },
-          "verifier_version": {
-            "type": "string",
-            "title": "Verifier Version"
-          },
-          "provider": {
-            "type": "string",
-            "title": "Provider"
-          },
-          "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model"
-          },
-          "input_sha256": {
-            "type": "string",
-            "title": "Input Sha256"
-          },
-          "report_sha256": {
-            "type": "string",
-            "title": "Report Sha256"
-          },
-          "report": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Report"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "fill_plan_revision_id",
-          "fill_plan_revision",
-          "status",
-          "deterministic_version",
-          "verifier_version",
-          "provider",
-          "model",
-          "input_sha256",
-          "report_sha256",
-          "report",
-          "created_at"
-        ],
-        "title": "VerificationReportResponse"
       },
       "VersionResponse": {
         "properties": {

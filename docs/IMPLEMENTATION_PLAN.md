@@ -65,7 +65,7 @@ Edits require the expected revision. Stale edits and late worker results cannot 
 
 ### Model Gateway and execution trace
 
-Use the OpenAI Python SDK and Responses API with Pydantic structured outputs. Configure models separately for template analysis, evidence extraction, mapping, and verification. Use `gpt-6-astra` as the initial evaluation baseline where available; keep model identifiers outside business logic.
+Use the OpenAI Python SDK and Responses API with Pydantic structured outputs. Configure models separately for evidence extraction and mapping. Keep model identifiers outside business logic.
 
 Record input references, model/provider, prompt/schema version, duration, usage, errors, and result references. Handle refusals and incomplete responses explicitly.
 
@@ -113,7 +113,7 @@ Template repair is separate from filling: show the defect, require an explicit t
 
 ### Evidence, derivations, and human decisions
 
-Preserve the PRD’s separate resolution, origin, verification, and review dimensions.
+Preserve the PRD’s separate resolution, origin, and review dimensions. Deterministic validation runs as part of mapping and review.
 
 - Every nonhuman proposal must reference evidence or an existing workbook formula.
 - Preserve contradictory evidence and uncertain entity matches.
@@ -125,7 +125,7 @@ Preserve the PRD’s separate resolution, origin, verification, and review dimen
 
 For prefilled targets, distinguish current-case evidence, reusable defaults, and previous-applicant content. Explicit reviewer decisions must determine whether existing case-specific values are retained, replaced, or cleared. A reviewer may approve a selected group of carry-forward values, with the decision recorded for each field.
 
-Human decisions set origin to `HUMAN` and retain earlier proposals/provenance. They receive no subsequent AI semantic verification. Deterministic checks still apply.
+Human decisions set origin to `HUMAN` and retain earlier proposals/provenance. Deterministic checks still apply.
 
 An upstream edit invalidates dependent nonhuman proposals. Human-approved dependent values remain unchanged but receive a dependency-change notice requiring acknowledgement.
 
@@ -194,19 +194,19 @@ Show selected values, alternatives, evidence, derivations, and unresolved issues
 - Overflow retains all records and creates a blocker.
 - Both outputs in ZIP 2 use the same frozen case evidence.
 
-No independent verifier yet.
+Historical Verification Reports remain available in the database, but new Fill Plan runs do not create verifier reports or invoke a second model.
 
 **Stop for approval.**
 
-### Phase 4 — Deterministic validation and independent verification
+### Phase 4 — Full-context mapping and deterministic validation
 
-Run deterministic field/section checks first, then a separate verifier invocation. Give the verifier access to the evidence snapshot for missed-evidence checks.
+Send the complete frozen evidence text and all template field descriptions to one mapping call, with extracted facts and agency details as supporting context. The model proposes field values, native write values, and source citations without a server-built candidate shortlist.
 
-It may pass, fail, identify additional evidence, or create issues. It cannot change values or trigger an automatic mapper/verifier debate.
+Retain deterministic provenance, type, choice, writable-field, and review checks. Keep optional blanks quiet, surface required blanks, and present located low-confidence or period-ambiguous evidence as a review suggestion. Do not run a separate AI verifier.
 
 **Acceptance:**
 
-Test incorrect entities, reporting periods, unsupported derivations, missed facts, and valid proposals. Measure error detection and false rejection. Assert that verification never mutates selected values.
+Track mapping input tokens. Cover identity aliases, revenue periods, address components, counts, coverage controls and choices, low-confidence facts, conflicts, unsupported dates, and native PDF write options. Confirm that each new Fill Plan run makes one mapping call.
 
 **Stop for approval.**
 
@@ -251,7 +251,7 @@ Basic immutable storage, revision checks, deduplication, and safe logging begin 
 
 ## 5. Evaluation and delivery requirements
 
-Maintain distinct expected results for template detection, extraction, mapping, verification, review, and rendering. This keeps failures attributable to their owning stage.
+Maintain distinct expected results for template detection, extraction, mapping, review, and rendering. This keeps failures attributable to their owning stage.
 
 For each labeled value, record expected resolution, origin, value, evidence, derivation, review requirement, and validation outcome. Reference outputs alone do not establish factual correctness.
 
@@ -268,7 +268,7 @@ Hard requirements for the acceptance suite:
 
 - Zero unsupported finalized values.
 - Complete provenance for accepted nonhuman values.
-- No AI alteration or semantic re-verification of human decisions.
+- No AI alteration of human decisions.
 - No unintended workbook structural changes.
 - Faithful rendering of the approved revision.
 

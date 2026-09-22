@@ -29,6 +29,83 @@ def _resolve(obj: Any) -> Any:
     return obj.get_object() if hasattr(obj, "get_object") else obj
 
 
+def _field_chain(annotation: Any) -> list[Any]:
+    """Return the widget and its AcroForm ancestors, nearest first."""
+    chain: list[Any] = []
+    current = annotation
+    visited: set[tuple[int, int]] = set()
+    while current is not None:
+        reference = getattr(current, "indirect_reference", None)
+        identity = (getattr(reference, "idnum", id(current)), getattr(reference, "generation", 0))
+        if identity in visited:
+            break
+        visited.add(identity)
+        chain.append(current)
+        parent = current.get("/Parent") if hasattr(current, "get") else None
+        current = _resolve(parent) if parent is not None else None
+    return chain
+
+
+def _qualified_name(chain: list[Any], fallback: str) -> tuple[str, str]:
+    components = [str(item.get("/T")) for item in reversed(chain) if item.get("/T") is not None]
+    if not components:
+        return fallback, fallback
+    return ".".join(components), components[-1]
+
+
+def _inherited(chain: list[Any], key: str, default: Any = None) -> Any:
+    for item in chain:
+        if key in item:
+            return item[key]
+    return default
+
+
+def _javascript(action: Any) -> str | None:
+    if action is None:
+        return None
+    action = _resolve(action)
+    value = action.get("/JS") if hasattr(action, "get") else None
+    return str(_resolve(value)) if value is not None else None
+
+
+def _choice_options(raw_options: Any) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    for raw in raw_options or []:
+        item = _resolve(raw)
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            export_value, display_value = str(_resolve(item[0])), str(_resolve(item[1]))
+        else:
+            export_value = display_value = str(item)
+        options.append({"export_value": export_value, "display_value": display_value})
+    return options
+
+
+def _format_hints(format_script: str | None, full_name: str) -> dict[str, Any]:
+    script = format_script or ""
+    hints: dict[str, Any] = {}
+    if "AFNumber_Format" in script:
+        hints["format_hint"] = "number"
+        import re
+
+        match = re.search(r"AFNumber_Format\s*\(\s*(\d+)", script)
+        if match:
+            hints["decimal_places"] = int(match.group(1))
+    elif "AFDate_" in script:
+        hints["format_hint"] = "date"
+        import re
+
+        match = re.search(r"AFDate_(?:Format|Keystroke)Ex\s*\(\s*['\"]([^'\"]+)", script)
+        if match:
+            hints["date_format"] = match.group(1)
+    lowered = full_name.lower()
+    if "format_hint" not in hints:
+        if any(token in lowered for token in ("date", "dob", "effective")):
+            hints["format_hint"] = "date"
+        elif any(token in lowered for token in ("percent", "revenue", "limit", "radius", "count")):
+            hints["format_hint"] = "number"
+    return hints
+
+
 def inspect_pdf(
     stream: BinaryIO, provider_blocks: list[dict[str, Any]] | None = None
 ) -> dict[str, Any]:
@@ -47,10 +124,11 @@ def inspect_pdf(
                 continue
             widget_count += 1
             parent_ref = annot.get("/Parent")
-            parent = _resolve(parent_ref or {})
-            name = str(annot.get("/T") or parent.get("/T") or f"widget_{widget_count}")
-            field_code = str(annot.get("/FT") or parent.get("/FT") or "") or None
-            flags = int(annot.get("/Ff") or parent.get("/Ff") or 0)
+            chain = _field_chain(annot)
+            fallback = f"widget_{widget_count}"
+            full_name, name = _qualified_name(chain, fallback)
+            field_code = str(_inherited(chain, "/FT", "") or "") or None
+            flags = int(_inherited(chain, "/Ff", 0) or 0)
             kind = _field_type(field_code, flags)
             rect = [float(value) for value in annot.get("/Rect", [0, 0, 0, 0])]
             # A widget with its own /T or /FT is itself a terminal field. Its
@@ -81,8 +159,12 @@ def inspect_pdf(
                 logical_fields[key]["widget_count"] += 1
                 states = _button_states(annot) if kind == "boolean" else []
                 logical_fields[key]["options"] = sorted(
-                    set(logical_fields[key]["options"] + states)
+                    set(logical_fields[key]["options"] + [state.lstrip("/") for state in states])
                 )
+                if states:
+                    logical_fields[key]["constraints"]["button_states"] = sorted(
+                        set(logical_fields[key]["constraints"].get("button_states", []) + states)
+                    )
                 logical_fields[key]["widget_options"].append(
                     {
                         "export_value": states[0] if states else None,
@@ -92,11 +174,23 @@ def inspect_pdf(
                 )
                 continue
             seen.add(key)
-            options_raw = annot.get("/Opt") or parent.get("/Opt") or []
-            options = []
-            for option in options_raw:
-                option = _resolve(option)
-                options.append(str(option[1] if isinstance(option, list) and len(option) > 1 else option))
+            options_raw = _inherited(chain, "/Opt", [])
+            choice_options = _choice_options(options_raw)
+            options = [option["display_value"] for option in choice_options]
+            additional_actions = _resolve(_inherited(chain, "/AA", {})) or {}
+            format_script = _javascript(additional_actions.get("/F")) if hasattr(additional_actions, "get") else None
+            keystroke_script = _javascript(additional_actions.get("/K")) if hasattr(additional_actions, "get") else None
+            max_length = _inherited(chain, "/MaxLen")
+            constraints: dict[str, Any] = {
+                "choice_options": choice_options,
+                "format_script": format_script,
+                "keystroke_script": keystroke_script,
+                **_format_hints(format_script, full_name),
+            }
+            if kind == "boolean":
+                constraints["button_states"] = _button_states(annot)
+            if max_length is not None:
+                constraints["max_length"] = int(max_length)
             location = {
                 "kind": "pdf_rect",
                 "page": page_index + 1,
@@ -109,13 +203,17 @@ def inspect_pdf(
                 "id": hashlib.sha1(key.encode()).hexdigest()[:16],
                 "label": name,
                 "native_name": name,
+                "native_full_name": full_name,
+                "native_object_id": key,
                 "field_type": kind,
                 "required": bool(flags & 2) if field_code else None,
                 "writable": kind not in {"signature", "action"} and not bool(flags & 1),
-                "current_value": str(annot.get("/V") or parent.get("/V") or ""),
+                "current_value": str(_inherited(chain, "/V", "") or ""),
                 "options": sorted(
-                    set(options + (_button_states(annot) if kind == "boolean" else []))
+                    set(options + ([state.lstrip("/") for state in _button_states(annot)] if kind == "boolean" else []))
                 ),
+                "choice_options": choice_options,
+                "constraints": constraints,
                 "location": location,
                 "widgets": [location],
                 "widget_count": 1,
@@ -168,7 +266,7 @@ def _button_states(annotation: Any) -> list[str]:
     normal = _resolve(appearances.get("/N", {})) if appearances else {}
     if not hasattr(normal, "keys"):
         return []
-    return [str(key).lstrip("/") for key in normal.keys() if str(key) != "/Off"]
+    return [str(key) for key in normal.keys() if str(key) != "/Off"]
 
 
 def render_pdf_page(stream: BinaryIO, page: int, scale: float = 1.5) -> bytes:

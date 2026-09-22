@@ -30,6 +30,13 @@ class WidgetOption(BaseModel):
     location: Location
 
 
+class ChoiceOption(BaseModel):
+    """Visible choice text and the value AcroForm expects when writing it."""
+
+    export_value: str
+    display_value: str
+
+
 class TemplateField(BaseModel):
     id: str
     label: str
@@ -41,7 +48,10 @@ class TemplateField(BaseModel):
     writable: bool = True
     location: Location
     native_name: str | None = None
+    native_full_name: str | None = None
+    native_object_id: str | None = None
     options: list[str] = Field(default_factory=list)
+    choice_options: list[ChoiceOption] = Field(default_factory=list)
     current_value: Any = None
     repeating_group_id: str | None = None
     notes: str | None = None
@@ -122,6 +132,8 @@ class EvidenceFact(BaseModel):
     entity_id: str
     entity_role: str
     provenance: list[EvidenceLocation]
+    source_block_ids: list[str] = Field(default_factory=list)
+    model_extraction: dict[str, Any] | None = None
     confidence: float = Field(ge=0, le=1)
     uncertainty: list[str] = Field(default_factory=list)
     unit: str | None = None
@@ -149,6 +161,9 @@ class EvidenceSnapshotPayload(BaseModel):
     parser_version: str
     extractor_version: str
     warnings: list[str] = Field(default_factory=list)
+    unresolved: list[dict[str, Any]] = Field(default_factory=list)
+    document_instructions: list[dict[str, Any]] = Field(default_factory=list)
+    model_extraction: dict[str, Any] | None = None
     source_sha256: str
 
 
@@ -222,6 +237,7 @@ class FillPlanCreate(BaseModel):
     template_version_id: str
     evidence_snapshot_ids: list[str] | None = None
     agency_key: str | None = None
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class AgencyResponse(BaseModel):
@@ -279,23 +295,6 @@ class FillPlanResponse(FillPlanSummary):
     mapper_version: str
     payload_sha256: str
     payload: dict[str, Any]
-
-
-class VerificationReportResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    fill_plan_revision_id: str
-    fill_plan_revision: int
-    status: Literal["pass", "fail", "needs_review"]
-    deterministic_version: str
-    verifier_version: str
-    provider: str
-    model: str | None
-    input_sha256: str
-    report_sha256: str
-    report: dict[str, Any]
-    created_at: datetime
 
 
 class ReviewDecisionCreate(BaseModel):

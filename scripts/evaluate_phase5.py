@@ -3,7 +3,7 @@
 import json
 
 from app.review import apply_review_decision
-from app.verification import EvidenceAwareVerifier, deterministic_validate
+from app.verification import deterministic_validate
 
 
 def main() -> None:
@@ -28,7 +28,6 @@ def main() -> None:
         "terminal_human_origin": reviewed["targets"][0]["review"]["origin"] == "human",
         "prior_candidate_preserved": len(reviewed["targets"][0]["candidates"]) == 2,
         "deterministic_status": deterministic_validate(reviewed)["status"],
-        "semantic_findings_after_human_decision": len(EvidenceAwareVerifier().verify(reviewed, [{"facts": []}])["findings"]),
         "audit_value_preserved": audit["new_value"] == "Amina Doe",
     }
     print(json.dumps(result, indent=2))

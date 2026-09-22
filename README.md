@@ -3,7 +3,7 @@
 The canonical phased roadmap and acceptance gates are documented in
 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md). Consult it before starting each phase.
 
-Phase 1 implements target ingestion and the Template Inspector. Phase 2 adds isolated source ingestion and an Evidence Inspector. Phase 3 adds grounded mapping and the Fill Plan Inspector. Phase 4 adds deterministic validation and an independent evidence-aware verifier. Phase 5 adds revision-pinned human review. Originals remain immutable and content-addressed. Final output generation intentionally remains for Phase 6.
+The app supports template inspection, isolated evidence inspection, full-context model mapping, deterministic validation, and revision-pinned human review. Originals remain immutable and content-addressed. The Fill Plan remains a review overlay; downloadable output generation is separate work.
 
 ## What is implemented
 
@@ -25,15 +25,13 @@ Inherited page widgets are reconciled through their terminal AcroForm parent. Wi
 - Untrusted-content controls: quoted email, signatures, and document-authored directions are not accepted as applicant facts or application instructions. Filled/reference outputs are rejected by the source endpoint.
 - Frozen, case-scoped evidence bundles shared across target outputs, with one current immutable snapshot per source and explicit snapshot selection support.
 - Immutable Fill Plan revisions with optimistic concurrency, published template-version pinning, native target locations, exact evidence provenance/confidence, selected proposals, alternatives, and unresolved issues.
-- Conservative semantic/type/entity mapping with PostgreSQL full-text candidate retrieval, deterministic SQLite test behavior, exact choice matching, and auditable boolean/date/number normalization.
-- Grounded restricted derivations with exposed inputs and as-of dates, maximum depth two, cycle rejection, and mandatory later human review. Model-generated code is never executed.
+- One mapping model call receives every frozen evidence text block, all extracted facts, and all template fields with their value constraints. The model proposes field values and source citations without a server-built shortlist.
+- The server checks cited provenance, value types, native form write values, choices, and writable fields before placing proposals in the Fill Plan preview. Uncertain or conflicting proposals remain available for review.
 - Repeating-record accounting that retains every entity and creates a blocker when target capacity is exceeded. Prefilled target values require later disposition and are never treated as current-case evidence.
-- Immutable Verification Reports pinned to an exact Fill Plan revision, payload hash, frozen evidence bundle hash, deterministic/verifier versions, and execution trace.
-- Deterministic structural, type, choice, provenance, derivation-depth, reporting-period, forbidden-write, and repeating-capacity checks that always run before independent verification.
-- A separate evidence-aware verifier that detects wrong-entity selections, unsupported values, conflicting facts, and evidence the mapper missed. It can pass, fail, or request review, but has no path that can alter a selected value.
+- Deterministic structural, type, choice, provenance, forbidden-write, and repeating-capacity checks. Optional blank fields do not create noise; required blanks and actionable exceptions are surfaced.
 - Append-only human review decisions pinned to exact source and resulting Fill Plan revisions, with optimistic concurrency for stale-edit protection.
 - Review-by-exception actions for proposal approval, candidate selection, typed edits, clear, N/A, intentional blank, and prefilled-value retention/replacement/clear disposition.
-- Terminal human authority: prior proposals and provenance remain inspectable, mapping cannot overwrite reviewed targets, and independent semantic verification skips human decisions while deterministic integrity checks continue.
+- Terminal human authority: prior proposals and provenance remain inspectable, and mapping cannot overwrite reviewed targets.
 - Dependency-change invalidation for nonhuman derived values and acknowledgement notices for human-approved dependents. Required-field exceptions require an audited reason and cannot waive forbidden writes or repeating overflow.
 - Immediate PDF/XLSX review overlays and explicit stale-calculation labeling. Phase 5 never regenerates a target document after an individual edit.
 
@@ -75,7 +73,6 @@ uv run ruff check app tests migrations
 uv run pytest -q
 uv run python -m scripts.evaluate_phase2 "/path/to/input and filled form 1.zip" "/path/to/input and filled form 2.zip"
 uv run python -m scripts.evaluate_phase3
-uv run python -m scripts.evaluate_phase4
 uv run python -m scripts.evaluate_phase5
 cd web
 pnpm build
@@ -95,15 +92,6 @@ Regenerate TypeScript OpenAPI contracts after an API change with `cd web && pnpm
 6. Change an input to a derived value. Confirm an unreviewed dependent is invalidated. Confirm a human-approved dependent remains unchanged but is blocked by a dependency-change notice until acknowledged.
 7. For workbook edits, confirm the edited value is visible in the overlay and formula results are clearly labeled stale when no supported calculation adapter is available. Confirm no regenerated output is offered.
 8. Run `uv run python -m scripts.evaluate_phase5` and the full automated commands above. Stop here for Phase 5 approval; final PDF/XLSX regeneration and downloads do not exist yet.
-
-## Manual Phase 4 acceptance walkthrough
-
-1. Complete the Phase 3 walkthrough and open a Fill Plan. Click **Run verification**. Confirm the report is labeled with the exact Fill Plan revision and separately shows deterministic and independent outcomes.
-2. Select fields with findings. Confirm wrong entity, reporting-period, conflicting-evidence, missed-evidence, and unsupported-derivation findings appear without changing the selected proposal shown beneath the report.
-3. Run verification again on the unchanged revision. Confirm the same immutable report is reused. Create a new Fill Plan revision and confirm it does not inherit the old revision's result.
-4. For a missed fact, confirm the report identifies additional frozen evidence but leaves the target unresolved; it must not remap or start an automated mapper/verifier debate.
-5. Run `uv run python -m scripts.evaluate_phase4`. The controlled gate must report full injected-error detection, zero clean-case false rejection, and `selection_unchanged: true` for every case.
-6. Run all automated commands above. Stop here for Phase 4 approval; no human approval decisions or regenerated outputs exist yet.
 
 ## Manual Phase 3 acceptance walkthrough
 

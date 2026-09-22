@@ -4,10 +4,19 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from difflib import SequenceMatcher
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from app.model_gateway import ModelGateway
 
 MAPPER_VERSION = "deterministic-mapper-v1"
+MODEL_MAPPER_VERSION = "model-mapper-v3-full-context"
+MAPPING_PROMPT_VERSION = "full-evidence-template-values-v3"
+MAPPING_SCHEMA_VERSION = "target-values-with-provenance-v3"
 ROLE_WORDS = {"applicant", "business", "driver", "vehicle", "broker", "owner", "agency"}
+ROLE_ORDER = ("applicant", "business", "driver", "vehicle", "broker", "owner", "agency")
 AGENCY_SNAPSHOT_ID = "agency-registry"
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 
@@ -16,13 +25,41 @@ class DerivationError(ValueError):
     pass
 
 
+class ModelTransformation(BaseModel):
+    operation: Literal["address_component", "count_records", "singleton_percentage", "coverage_control"]
+    component: Literal["street", "city", "state", "postal_code"] | None = None
+
+
+class ModelMappingProposal(BaseModel):
+    target_field_id: str
+    evidence_fact_ids: list[str] = Field(default_factory=list)
+    source_block_ids: list[str] = Field(default_factory=list)
+    canonical_value: Any | None = None
+    native_write_value: Any | None = None
+    confidence: float | None = None
+    transformation: ModelTransformation | None = None
+    rationale: str = ""
+
+
+class ModelFillPlanOutput(BaseModel):
+    proposals: list[ModelMappingProposal]
+
+
 def _tokens(value: str) -> set[str]:
     return set(TOKEN_RE.findall(value.casefold().replace("_", " ")))
 
 
 def _target_role(field: dict[str, Any]) -> str | None:
     words = _tokens(f"{field.get('semantic_type') or ''} {field.get('label') or ''}")
-    return next((role for role in ROLE_WORDS if role in words), None)
+    return next((role for role in ROLE_ORDER if role in words), None)
+
+
+def _is_prefilled(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return value != ""
 
 
 def _type_compatible(field_type: str, fact: dict[str, Any]) -> bool:
@@ -44,24 +81,76 @@ def _match_score(field: dict[str, Any], fact: dict[str, Any]) -> float:
     semantic = (field.get("semantic_type") or "").casefold()
     key = str(fact.get("key") or "").casefold()
     label = str(field.get("label") or "")
+    native_name = str(field.get("native_name") or field.get("native_full_name") or "")
     fact_label = str(fact.get("label") or key)
     target_role = _target_role(field)
     fact_role = str(fact.get("entity_role") or "").casefold()
-    if target_role and fact_role and target_role != fact_role:
+    role_aliases = {"applicant": "business", "insured": "business", "company": "business"}
+    if target_role and fact_role and role_aliases.get(target_role, target_role) != role_aliases.get(fact_role, fact_role):
         return 0.0
     if semantic and semantic == key:
         base = 1.0
     elif semantic and semantic.split(".")[-1] == key.split(".")[-1]:
         base = 0.88
     else:
-        left = _tokens(f"{semantic} {label}") - ROLE_WORDS
-        right = _tokens(f"{key} {fact_label}") - ROLE_WORDS
+        left = _expanded_tokens(_tokens(f"{semantic} {label} {native_name}") - ROLE_WORDS)
+        right = _expanded_tokens(_tokens(f"{key} {fact_label}") - ROLE_WORDS)
         overlap = len(left & right) / max(1, len(left | right))
         similarity = SequenceMatcher(None, label.casefold(), fact_label.casefold()).ratio()
-        base = max(overlap, similarity * 0.82)
+        concepts_left = _concept_tokens(_tokens(f"{semantic} {label}") - ROLE_WORDS)
+        concepts_right = _concept_tokens(_tokens(f"{key} {fact_label}") - ROLE_WORDS)
+        concept_overlap = concepts_left & concepts_right
+        base = max(overlap, similarity * 0.82, 0.68 if concept_overlap & {"tax_id", "revenue", "business"} else 0)
     if target_role and fact_role == target_role:
         base = min(1.0, base + 0.05)
     return round(base, 4)
+
+
+_TERM_EQUIVALENTS = {
+    "ein": {"ein", "fein", "tax", "employer", "identification", "number"},
+    "fein": {"ein", "fein", "tax", "employer", "identification", "number"},
+    "business": {"business", "company", "insured", "applicant", "organization"},
+    "company": {"business", "company", "insured", "applicant", "organization"},
+    "insured": {"business", "company", "insured", "applicant", "organization"},
+    "revenue": {"revenue", "sales", "sale", "gross", "income", "receipts"},
+    "sales": {"revenue", "sales", "sale", "gross", "income", "receipts"},
+    "sale": {"revenue", "sales", "sale", "gross", "income", "receipts"},
+    "gross": {"revenue", "sales", "sale", "gross", "income", "receipts"},
+    "address": {"address", "street", "city", "state", "province", "postal", "zip"},
+    "coverage": {"coverage", "limit", "liability", "policy", "protection"},
+    "al": {"al", "auto", "liability"},
+    "gl": {"gl", "general", "liability"},
+}
+
+
+def _expanded_tokens(words: set[str]) -> set[str]:
+    return words | set().union(*(_TERM_EQUIVALENTS.get(word, {word}) for word in words))
+
+
+def _concept_tokens(words: set[str]) -> set[str]:
+    concepts: set[str] = set()
+    for word in words:
+        equivalents = _TERM_EQUIVALENTS.get(word)
+        if equivalents and "fein" in equivalents:
+            concepts.add("tax_id")
+        elif equivalents and "receipts" in equivalents:
+            concepts.add("revenue")
+        elif equivalents and "insured" in equivalents:
+            concepts.add("business")
+        else:
+            concepts.add(word)
+    return concepts
+
+
+def _coverage_category(value: dict[str, Any]) -> str | None:
+    words = _tokens(f"{value.get('semantic_type') or ''} {value.get('label') or ''} {value.get('native_name') or value.get('key') or ''}")
+    if words & {"cargo", "motor"}:
+        return "cargo"
+    if words & {"general", "gl"}:
+        return "general_liability"
+    if words & {"auto", "al"}:
+        return "auto_liability"
+    return None
 
 
 def _decimal(value: Any) -> Decimal | None:
@@ -110,12 +199,36 @@ def _normalize(field: dict[str, Any], value: Any) -> tuple[Any, str, list[str]]:
         lowered = str(value).strip().casefold()
         normalized = lowered in {"true", "yes", "y", "1"}
         return normalized, "normalized", []
-    if field_type == "choice" and field.get("options"):
-        matches = [option for option in field["options"] if str(option).casefold() == str(value).strip().casefold()]
-        if not matches:
-            return value, "direct", ["Value is not an exact allowed choice"]
-        return matches[0], "normalized" if matches[0] != value else "direct", []
+    if field_type == "choice":
+        pairs = field.get("choice_options") or (field.get("constraints") or {}).get("choice_options") or []
+        if pairs:
+            match = next(
+                (
+            option
+            for option in pairs
+            if _choice_value_equal(option.get("display_value"), value)
+            or _choice_value_equal(option.get("export_value"), value)
+                ),
+                None,
+            )
+            if match is None:
+                return value, "direct", ["Value is not an exact allowed choice"]
+            display = match.get("display_value")
+            return display, "normalized" if display != value else "direct", []
+        if field.get("options"):
+            matches = [option for option in field["options"] if str(option).casefold() == str(value).strip().casefold()]
+            if not matches:
+                return value, "direct", ["Value is not an exact allowed choice"]
+            return matches[0], "normalized" if matches[0] != value else "direct", []
     return value, "direct", []
+
+
+def _choice_value_equal(left: Any, right: Any) -> bool:
+    left_decimal = _decimal(left)
+    right_decimal = _decimal(right)
+    if left_decimal is not None and right_decimal is not None and left_decimal == right_decimal:
+        return True
+    return str(left).strip().casefold() == str(right).strip().casefold()
 
 
 def _candidate(field: dict[str, Any], snapshot_id: str, fact: dict[str, Any], score: float) -> dict[str, Any]:
@@ -221,6 +334,778 @@ def build_fill_plan(
     }
 
 
+def mapping_profile_hash(
+    *,
+    model: str,
+    reasoning_effort: str,
+    prompt_version: str = MAPPING_PROMPT_VERSION,
+    schema_version: str = MAPPING_SCHEMA_VERSION,
+    mapper_version: str = MODEL_MAPPER_VERSION,
+    agency_facts_hash: str | None = None,
+) -> str:
+    profile = {
+        "mapper_version": mapper_version,
+        "model": model,
+        "reasoning_effort": reasoning_effort,
+        "prompt_version": prompt_version,
+        "schema_version": schema_version,
+        "agency_facts_hash": agency_facts_hash,
+    }
+    return hashlib.sha256(json.dumps(profile, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _model_fact_rows(
+    snapshots: list[tuple[str, dict[str, Any]]], agency_facts: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    rows = [
+        {**fact, "snapshot_id": snapshot_id, "source_kind": "evidence",
+         "source_block_ids": [f"{snapshot_id}:{block_id}" for block_id in (fact.get("source_block_ids") or [])]}
+        for snapshot_id, snapshot in snapshots
+        for fact in snapshot.get("facts", [])
+    ]
+    rows.extend(
+        {**fact, "snapshot_id": AGENCY_SNAPSHOT_ID, "source_kind": "agency"}
+        for fact in agency_facts
+    )
+    return rows
+
+
+def _model_fact_rows_compact(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    keys = (
+        "id", "snapshot_id", "source_kind", "key", "label", "value",
+        "raw_value", "value_type", "entity_id", "entity_role", "confidence",
+        "accepted", "uncertainty", "contradicts", "source_block_ids",
+    )
+    return [{key: row.get(key) for key in keys if key in row} for row in rows]
+
+
+def _model_evidence_blocks(snapshots: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Return every frozen extracted text block with a stable model-facing ID."""
+    blocks: list[dict[str, Any]] = []
+    for snapshot_id, snapshot in snapshots:
+        for index, block in enumerate(snapshot.get("parse_blocks", []) or []):
+            if isinstance(block, str):
+                block = {"text": block}
+            block = dict(block)
+            raw_block_id = str(block.get("id") or block.get("block_id") or hashlib.sha1(
+                f"{snapshot_id}:block:{index}:{block.get('text', '')}".encode()
+            ).hexdigest()[:20])
+            block_id = raw_block_id if raw_block_id.startswith(f"{snapshot_id}:") else f"{snapshot_id}:{raw_block_id}"
+            blocks.append({
+                "id": block_id,
+                "snapshot_id": snapshot_id,
+                "artifact_id": block.get("artifact_id") or snapshot.get("_artifact_id") or snapshot.get("artifact_id"),
+                "page": block.get("page"),
+                "text": str(block.get("text") or block.get("content") or ""),
+            })
+    return blocks
+
+
+def _model_targets(fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expose the complete textual template contract to the mapping model."""
+    rows = []
+    for field in fields:
+        row = dict(field)
+        # Geometry and opaque implementation metadata add noise; labels and all
+        # value constraints are intentionally retained.
+        for key in ("rect", "x", "y", "width", "height", "geometry"):
+            row.pop(key, None)
+        rows.append(row)
+    return rows
+
+
+def _mapping_shortlist(
+    fields: list[dict[str, Any]], facts: list[dict[str, Any]], *, per_field: int = 5
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Build a bounded target/fact shortlist; native geometry stays server-side."""
+    target_rows: list[dict[str, Any]] = []
+    fact_ids: set[str] = set()
+    for field in fields:
+        if not bool(field.get("writable", True)) or field.get("field_type") in {"signature", "action"}:
+            continue
+        if _is_prefilled(field.get("current_value")):
+            continue
+        target_terms = _tokens(f"{field.get('semantic_type') or ''} {field.get('label') or ''} {field.get('native_name') or ''}")
+        is_record_count = bool(target_terms & {"count", "number", "total", "no"}) and bool(target_terms & {"driver", "drivers", "vehicle", "vehicles"})
+        def count_source(fact: dict[str, Any]) -> bool:
+            role = str(fact.get("entity_role") or "").casefold()
+            if target_terms & {"vehicle", "vehicles"}:
+                return role == "vehicle"
+            return role == "driver" or (
+                bool(target_terms & {"driver", "drivers"})
+                and role == "applicant"
+                and bool(_tokens(f"{fact.get('key')} {fact.get('label')}") & {"person", "driver", "license", "licence"})
+            )
+        ranked = sorted(
+            (
+                (max(_match_score(field, fact), 0.72) if _coverage_category(field) and _coverage_category(field) == _coverage_category(fact)
+                 else max(_match_score(field, fact), 0.6) if is_record_count and count_source(fact)
+                 else _match_score(field, fact), fact)
+                for fact in facts
+                if _type_compatible(field.get("field_type", "unknown"), fact)
+                or (field.get("field_type") == "boolean" and bool(target_terms & {"coverage", "yesno", "yes", "no"}) and _decimal(fact.get("value")) is not None)
+                or (is_record_count and count_source(fact))
+                if not (_coverage_category(field) and _coverage_category(fact) and _coverage_category(field) != _coverage_category(fact))
+            ),
+            key=lambda pair: pair[0],
+            reverse=True,
+        )
+        relevant = [(score, fact) for score, fact in ranked if score >= 0.45][:per_field]
+        if not relevant:
+            continue
+        field_type = field.get("field_type")
+        model_target = {key: field.get(key) for key in (
+            "id", "native_name", "native_full_name", "label", "semantic_type", "field_type",
+        ) if key in field}
+        if field_type == "choice":
+            model_target["choice_options"] = field.get("choice_options") or (field.get("constraints") or {}).get("choice_options", [])
+        elif field_type == "boolean":
+            model_target["button_states"] = (field.get("constraints") or {}).get("button_states", [])
+        target_rows.append({
+            "target": model_target,
+            "candidate_fact_ids": [fact["id"] for _score, fact in relevant],
+        })
+        fact_ids.update(fact["id"] for _score, fact in relevant)
+    fact_rows = [fact for fact in facts if fact["id"] in fact_ids]
+    return target_rows, _model_fact_rows_compact(fact_rows)
+
+
+def _model_references(
+    output: ModelFillPlanOutput,
+    fields_by_id: dict[str, dict[str, Any]],
+    facts_by_id: dict[str, dict[str, Any]],
+    block_ids: set[str] | None = None,
+) -> None:
+    seen_targets: set[str] = set()
+    for proposal in output.proposals:
+        field = fields_by_id.get(proposal.target_field_id)
+        if field is None:
+            raise ValueError(f"Model proposed unknown target field {proposal.target_field_id}")
+        if proposal.target_field_id in seen_targets:
+            raise ValueError(f"Model returned more than one proposal for {proposal.target_field_id}")
+        seen_targets.add(proposal.target_field_id)
+        missing = sorted(set(proposal.evidence_fact_ids) - facts_by_id.keys())
+        if missing:
+            raise ValueError(f"Model cited unknown evidence fact ID(s): {', '.join(missing)}")
+        if block_ids is not None:
+            missing_blocks = sorted(set(proposal.source_block_ids) - block_ids)
+            if missing_blocks:
+                raise ValueError(f"Model cited unknown source block ID(s): {', '.join(missing_blocks)}")
+        if not proposal.evidence_fact_ids and not proposal.source_block_ids:
+            raise ValueError(f"Model proposal for {proposal.target_field_id} has no source reference")
+        if proposal.transformation and proposal.transformation.operation == "address_component" and not proposal.transformation.component:
+            raise ValueError(f"Address component proposal for {proposal.target_field_id} has no component")
+
+
+def _semantic_compatible(field: dict[str, Any], fact: dict[str, Any], score: float) -> bool:
+    field_type = field.get("field_type", "unknown")
+    value = fact.get("value")
+    if field_type == "text" and (isinstance(value, (int, float)) or _decimal(value) is not None):
+        quantitative = {"percent", "percentage", "rate", "number", "count", "year", "radius", "revenue", "limit", "premium", "mileage", "value"}
+        target_words = _tokens(f"{field.get('semantic_type') or ''} {field.get('label') or ''}")
+        value_words = _tokens(f"{fact.get('key') or ''} {fact.get('label') or ''}")
+        if not (target_words & quantitative or value_words & (target_words & quantitative)):
+            return False
+    semantic = str(field.get("semantic_type") or "").casefold()
+    fact_key = str(fact.get("key") or "").casefold()
+    if semantic and fact_key and semantic != fact_key:
+        expected_leaf = semantic.split(".")[-1]
+        actual_leaf = fact_key.split(".")[-1]
+        target_tokens = _tokens(f"{expected_leaf} {field.get('label') or ''}") - ROLE_WORDS
+        fact_tokens = _tokens(f"{actual_leaf} {fact.get('label') or ''}") - ROLE_WORDS
+        if expected_leaf != actual_leaf and not target_tokens.intersection(fact_tokens) and score < 0.82:
+            return False
+    return True
+
+
+def _validate_singleton_percentage_context(
+    field: dict[str, Any], sources: list[dict[str, Any]], fact_rows: list[dict[str, Any]]
+) -> None:
+    target_words = _tokens(f"{field.get('semantic_type') or ''} {field.get('label') or ''}")
+    if not target_words & {"percent", "percentage"}:
+        raise DerivationError("Singleton percentage can only target a percentage field")
+    if not sources:
+        raise DerivationError("Singleton percentage has no supporting category fact")
+    roles = {str(source.get("entity_role") or "").casefold() for source in sources}
+    if len(roles) != 1 or not roles.issubset({"business", "driver", "vehicle"}):
+        raise DerivationError("Singleton percentage inputs do not identify one record category")
+    role = next(iter(roles))
+    source_tokens = set().union(*(_tokens(f"{source.get('key')} {source.get('label')}") for source in sources))
+    if "trip" in target_words or "radius" in target_words:
+        category_facts = [
+            fact
+            for fact in fact_rows
+            if fact.get("accepted", True)
+            and str(fact.get("entity_role") or "").casefold() == role
+            and _tokens(f"{fact.get('key')} {fact.get('label')}") & {"radius", "haul", "range"}
+        ]
+        cited = [fact for fact in sources if _tokens(f"{fact.get('key')} {fact.get('label')}") & {"radius", "haul", "range"}]
+        if not cited or not category_facts:
+            raise DerivationError("Percentage Trip requires a radius/haul category fact")
+        categories = {(str(fact.get("key")), str(fact.get("value"))) for fact in category_facts}
+        if len(categories) != 1 or not {fact.get("id") for fact in cited} >= {fact.get("id") for fact in category_facts}:
+            raise DerivationError("Percentage Trip has multiple or uncited radius categories")
+    else:
+        core = target_words - {"percent", "percentage", "percenttrip", "trip", "business", "operations", "template", "policy", "coverage"}
+        service_domain = {"service", "services", "operation", "operations", "category", "towing", "cargo", "hauling"}
+        if not core or not (core & service_domain) or not source_tokens & core:
+            raise DerivationError("Singleton percentage evidence does not identify the target operation category")
+        category_facts = [
+            fact
+            for fact in fact_rows
+            if fact.get("accepted", True)
+            and str(fact.get("entity_role") or "").casefold() == role
+            and core.issubset(_tokens(f"{fact.get('key')} {fact.get('label')}"))
+            and not (_tokens(f"{fact.get('key')} {fact.get('label')}") & {"percent", "percentage"})
+        ]
+        categories = {(str(fact.get("key")), str(fact.get("value"))) for fact in category_facts}
+        cited_ids = {fact.get("id") for fact in sources if core.issubset(_tokens(f"{fact.get('key')} {fact.get('label')}"))}
+        if len(categories) != 1 or not {fact.get("id") for fact in category_facts}.issubset(cited_ids):
+            raise DerivationError("Target operation has multiple or uncited service categories")
+    all_entities = {
+        fact.get("entity_id")
+        for fact in fact_rows
+        if fact.get("accepted", True) and str(fact.get("entity_role") or "").casefold() == role
+    }
+    source_entities = {fact.get("entity_id") for fact in sources}
+    if len(all_entities) != 1 or None in all_entities or source_entities != all_entities:
+        raise DerivationError("Singleton percentage requires exactly one fully cited supported record")
+
+
+def _write_value_issues(field: dict[str, Any], canonical: Any, write_value: Any) -> list[str]:
+    field_type = field.get("field_type", "unknown")
+    constraints = field.get("constraints") or {}
+    issues: list[str] = []
+    if field_type == "choice":
+        pairs = field.get("choice_options") or constraints.get("choice_options") or []
+        if pairs:
+            matches = [item for item in pairs if str(item.get("display_value")) == str(canonical)]
+            if len(matches) != 1 or str(write_value) != str(matches[0].get("export_value")):
+                issues.append("Write value does not match the target choice export for the canonical display value")
+        elif field.get("options") and (not any(_choice_value_equal(option, canonical) for option in field["options"]) or write_value != canonical):
+            issues.append("Canonical/write value is not an exact allowed choice")
+    elif field_type == "number":
+        canonical_number = _decimal(canonical)
+        write_number = _decimal(write_value)
+        if canonical_number is None or write_number is None or canonical_number != write_number:
+            issues.append("Write value does not preserve the canonical numeric value")
+        if write_number is not None and not _valid_numeric_write(write_value, constraints):
+            issues.append("Write value has invalid numeric grouping or separators")
+        decimal_places = constraints.get("decimal_places")
+        if decimal_places is not None and write_number is not None and max(0, -write_number.as_tuple().exponent) > int(decimal_places):
+            issues.append("Write value exceeds the target decimal-place constraint")
+        minimum = constraints.get("minimum", constraints.get("min_value"))
+        maximum = constraints.get("maximum", constraints.get("max_value"))
+        if canonical_number is not None and minimum is not None and canonical_number < Decimal(str(minimum)):
+            issues.append("Canonical value is below the target minimum")
+        if canonical_number is not None and maximum is not None and canonical_number > Decimal(str(maximum)):
+            issues.append("Canonical value exceeds the target maximum")
+    elif field_type == "date" or (field_type == "text" and constraints.get("format_hint") == "date"):
+        canonical_date = _date_value(canonical)
+        raw_write_date = str(write_value)
+        date_format = constraints.get("date_format")
+        if (constraints.get("format_hint") == "date" or field_type == "text") and not date_format:
+            issues.append("Target date format is unspecified and needs review")
+        expected = _formatted_date(canonical_date, date_format) if canonical_date else None
+        if expected is None or raw_write_date != expected:
+            issues.append("Write value does not match the target date format")
+    elif field_type == "boolean":
+        truth = str(canonical).strip().casefold() in {"true", "yes", "y", "1"}
+        states = [str(item) for item in constraints.get("button_states", [])]
+        if states:
+            on = next((state for state in states if state.casefold().lstrip("/") not in {"off", "no", "false", "0"}), None)
+            off = next((state for state in states if state.casefold().lstrip("/") in {"off", "no", "false", "0"}), None)
+            expected = on if truth else off
+            if expected is None or str(write_value) != expected:
+                issues.append("Write value does not match the target button state")
+        elif not isinstance(canonical, bool) or write_value is not canonical:
+            issues.append("Write value does not match the canonical boolean")
+    elif field_type == "text" and constraints.get("format_hint") == "number":
+        canonical_number = _decimal(canonical)
+        write_number = _decimal(write_value)
+        if canonical_number is None or write_number is None or canonical_number != write_number:
+            issues.append("Numeric write value does not preserve the canonical value")
+        if write_number is not None and not _valid_numeric_write(write_value, constraints):
+            issues.append("Write value has invalid numeric grouping or separators")
+        script = str(constraints.get("format_script") or "")
+        if script:
+            expected = _formatted_number(canonical, constraints)
+            if expected is None:
+                issues.append("Custom numeric format script cannot be deterministically validated")
+            elif str(write_value) != expected:
+                issues.append("Write value does not match the inspected numeric format")
+        decimal_places = constraints.get("decimal_places")
+        if decimal_places is not None and write_number is not None and max(0, -write_number.as_tuple().exponent) > int(decimal_places):
+            issues.append("Write value exceeds the target decimal-place constraint")
+    elif field_type in {"text", "unknown"} and str(write_value) != str(canonical):
+        issues.append("Text write value differs from the canonical value")
+    quantitative = _tokens(f"{field.get('semantic_type') or ''} {field.get('label') or ''}")
+    if field_type == "text" and quantitative & {"percent", "percentage"}:
+        percentage = _decimal(canonical)
+        if percentage is None or percentage < 0 or percentage > 100:
+            issues.append("Percentage value must be between 0 and 100")
+        write_percentage = _decimal(write_value)
+        if percentage is not None and write_percentage != percentage:
+            issues.append("Percentage write value differs from its canonical value")
+    if write_value is not None and constraints.get("max_length") is not None and len(str(write_value)) > int(constraints["max_length"]):
+        issues.append("Write value exceeds the target maximum length")
+    # Arbitrary PDF JavaScript is data, never code to execute. Such formats need review.
+    if constraints.get("format_script") and not constraints.get("format_hint"):
+        issues.append("Target has a custom PDF format script that cannot be deterministically validated")
+    return issues
+
+
+def _formatted_number(value: Any, constraints: dict[str, Any]) -> str | None:
+    number = _decimal(value)
+    if number is None:
+        return None
+    decimal_places = constraints.get("decimal_places")
+    separator = constraints.get("thousands_separator", "")
+    decimal_separator = constraints.get("decimal_separator", ".")
+    currency_symbol = str(constraints.get("currency_symbol") or "")
+    currency_style = 0
+    negative_style = 1
+    format_script = str(constraints.get("format_script") or "")
+    if format_script:
+        match = re.search(
+            r"AFNumber_Format\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['\"])(.*?)\5",
+            format_script,
+        )
+        if not match:
+            return None
+        decimal_places = int(match.group(1))
+        separator_style = int(match.group(2))
+        negative_style = int(match.group(3))
+        currency_style = int(match.group(4))
+        currency_symbol = match.group(6)
+        if separator_style == 0:
+            separator, decimal_separator = ",", "."
+        elif separator_style == 1:
+            separator, decimal_separator = ".", ","
+        else:
+            return None
+    negative = number < 0
+    absolute = abs(number)
+    if decimal_places is not None:
+        quantum = Decimal(1).scaleb(-int(decimal_places))
+        absolute = absolute.quantize(quantum)
+        body = f"{absolute:.{int(decimal_places)}f}"
+    else:
+        body = format(absolute, "f") if absolute else "0"
+        if "." in body:
+            body = body.rstrip("0").rstrip(".")
+    integer, dot, fraction = body.partition(".")
+    if separator:
+        integer = f"{int(integer):,}".replace(",", separator)
+    body = integer + (decimal_separator + fraction if dot else "")
+    if currency_symbol:
+        if currency_style in {0, 1}:
+            body = currency_symbol + (" " if currency_style == 1 else "") + body
+        elif currency_style in {2, 3}:
+            body = body + (" " if currency_style == 3 else "") + currency_symbol
+        else:
+            return None
+    if negative:
+        if negative_style == 0:
+            body = f"({body})"
+        elif negative_style == 1:
+            body = f"-{body}"
+        elif negative_style == 2:
+            body = f"{body}-"
+        else:
+            return None
+    return body
+
+
+def _valid_numeric_write(value: Any, constraints: dict[str, Any]) -> bool:
+    if isinstance(value, (int, float, Decimal)):
+        return True
+    raw = str(value).strip()
+    negative_parentheses = raw.startswith("(") and raw.endswith(")")
+    if negative_parentheses:
+        raw = raw[1:-1].strip()
+    raw = re.sub(r"^[\$€£]\s*|\s*[\$€£]$", "", raw)
+    raw = raw.removesuffix("%").strip()
+    raw = raw.lstrip("+-")
+    if not raw:
+        return False
+    thousands = constraints.get("thousands_separator", ",")
+    decimal_separator = constraints.get("decimal_separator", ".")
+    script = str(constraints.get("format_script") or "")
+    style = re.search(r"AFNumber_Format\s*\(\s*\d+\s*,\s*(\d+)", script)
+    if style:
+        if style.group(1) == "0":
+            thousands, decimal_separator = ",", "."
+        elif style.group(1) == "1":
+            thousands, decimal_separator = ".", ","
+        else:
+            return False
+    decimal_pattern = rf"(?:\d+|\d{{1,3}}(?:{re.escape(str(thousands))}\d{{3}})+)"
+    if not thousands:
+        decimal_pattern = r"\d+"
+    integer_and_fraction = rf"{decimal_pattern}(?:{re.escape(str(decimal_separator))}\d+)?"
+    return bool(re.fullmatch(rf"(?:{integer_and_fraction}|{re.escape(str(decimal_separator))}\d+)", raw))
+
+
+def _formatted_date(value: date, date_format: str | None) -> str | None:
+    if not date_format:
+        return value.isoformat()
+    normalized = re.sub(r"[^a-z]", "", str(date_format or "").casefold())
+    formats = {
+        "iso": "%Y-%m-%d",
+        "yyyymmdd": "%Y-%m-%d",
+        "mmddyyyy": "%m/%d/%Y",
+        "mddyyyy": "%-m/%-d/%Y",
+        "mmddyy": "%m/%d/%y",
+        "mddyy": "%-m/%-d/%y",
+        "ddmmyyyy": "%d/%m/%Y",
+        "dmmyyyy": "%-d/%-m/%Y",
+        "ddmmyy": "%d/%m/%y",
+        "dmmyy": "%-d/%-m/%y",
+    }
+    pattern = formats.get(normalized)
+    return value.strftime(pattern) if pattern else None
+
+
+def format_write_value(field: dict[str, Any], canonical_value: Any) -> Any:
+    """Derive a PDF-compatible write value from a canonical value and target hints."""
+    field_type = field.get("field_type", "unknown")
+    if field_type == "choice":
+        pairs = field.get("choice_options") or (field.get("constraints") or {}).get("choice_options") or []
+        match = next((item for item in pairs if str(item.get("display_value")) == str(canonical_value)), None)
+        if match:
+            return match.get("export_value")
+        return canonical_value
+    constraints = field.get("constraints") or {}
+    if field_type == "date" or (field_type == "text" and constraints.get("format_hint") == "date"):
+        parsed = _date_value(canonical_value)
+        if parsed is None:
+            raise ValueError("Canonical date must be a valid ISO date")
+        date_format = constraints.get("date_format")
+        if (constraints.get("format_hint") == "date" or field_type == "text") and not date_format:
+            raise ValueError("Target date format is unspecified; configure constraints.date_format first")
+        formatted = _formatted_date(parsed, date_format)
+        if formatted is None:
+            raise ValueError(f"Unsupported target date format {date_format!r}")
+        return formatted
+    if field_type == "text" and constraints.get("format_hint") == "number":
+        if constraints.get("format_script"):
+            formatted = _formatted_number(canonical_value, constraints)
+            if formatted is None:
+                raise ValueError("Target numeric format script cannot be deterministically validated")
+            return formatted
+        return str(canonical_value)
+    if field_type == "boolean":
+        truth = canonical_value is True or str(canonical_value).strip().casefold() in {"true", "yes", "y", "1"}
+        constraints = field.get("constraints") or {}
+        states = [str(item) for item in constraints.get("button_states", [])]
+        if states:
+            selected = next((state for state in states if (state.casefold().lstrip("/") not in {"off", "no", "false", "0"}) == truth), None)
+            if selected is None:
+                raise ValueError("Target has no button state for the canonical boolean")
+            return selected
+        return truth
+    return canonical_value
+
+
+def validate_write_value(
+    field: dict[str, Any],
+    canonical_value: Any,
+    write_value: Any,
+    *,
+    allow_blank: bool = False,
+    allow_exception: bool = False,
+) -> list[str]:
+    """Return exact target-constraint failures for a canonical/write-value pair."""
+    if allow_blank and canonical_value in (None, "") and write_value in (None, ""):
+        return []
+    if allow_exception and field.get("field_type") == "text" and str(canonical_value).strip().casefold() in {"n/a", "na", "not applicable"} and str(write_value).strip().casefold() in {"n/a", "na", "not applicable"}:
+        maximum = (field.get("constraints") or {}).get("max_length")
+        if maximum is not None and len(str(write_value)) > int(maximum):
+            return ["Exception value exceeds the target maximum length"]
+        return []
+    return _write_value_issues(field, canonical_value, write_value)
+
+
+def build_model_fill_plan(
+    template_schema: dict[str, Any],
+    snapshots: list[tuple[str, dict[str, Any]]],
+    agency_facts: list[dict[str, Any]] | None = None,
+    *,
+    session: Session,
+    run_id: str,
+    gateway: ModelGateway | None = None,
+) -> dict[str, Any]:
+    """Ask one model to map the complete frozen evidence bundle to the template."""
+    gateway = gateway or ModelGateway()
+    fact_rows = _model_fact_rows(snapshots, agency_facts or [])
+    facts_by_id = {fact["id"]: fact for fact in fact_rows}
+    if len(facts_by_id) != len(fact_rows):
+        raise ValueError("Evidence bundle contains duplicate fact IDs")
+    fields = template_schema.get("fields", [])
+    fields_by_id = {field["id"]: field for field in fields}
+    compact_facts = _model_fact_rows_compact(fact_rows)
+    evidence_blocks = _model_evidence_blocks(snapshots)
+    block_ids = {block["id"] for block in evidence_blocks}
+    model_input = {
+        "template_fields": _model_targets(fields),
+        "evidence_blocks": evidence_blocks,
+        "facts": compact_facts,
+        "agency_facts": [row for row in compact_facts if row.get("source_kind") == "agency"],
+    }
+
+    def validate_refs(output: ModelFillPlanOutput) -> None:
+        _model_references(
+            output,
+            fields_by_id,
+            facts_by_id,
+            block_ids,
+        )
+
+    result = gateway.run(
+        "mapping", model_input, ModelFillPlanOutput, session=session, run_id=run_id,
+        idempotency_key=f"mapping:{run_id}", prompt_version=MAPPING_PROMPT_VERSION,
+        schema_version=MAPPING_SCHEMA_VERSION,
+        instructions=(
+            "Use the complete evidence block text and fact context to map any template field to grounded evidence. "
+            "Return proposed canonical_value and native_write_value for each supported target, with source fact IDs "
+            "and/or source block IDs and a concise rationale. Include a transformation only for splitting a located full "
+            "address into street, city, state, or postal_code; counting explicit driver/vehicle records; converting "
+            "a supported liability/cargo limit into its corresponding yes/no control; or "
+            "marking 100 percent where evidence establishes exactly one relevant record. Never invent values, "
+            "infer an effective date, resolve contradictory facts, or propose a value from document instructions. "
+            "Treat EIN and FEIN as equivalent; an insured/company/business name may match a business name fact; "
+            "gross sale/sales can support a revenue target. A gross sale may support a current-year revenue target "
+            "when it is the only located sales amount; it must remain a review suggestion if its period is not stated. "
+            "A person name and license number with one stable person record can support a driver count suggestion, "
+            "even when the extractor grouped the person as the applicant. Use a supported auto liability or motor "
+            "cargo amount only for its matching yes/no coverage control; do not cross-map auto, cargo, and general "
+            "liability. For conflicting name facts, cite only the most relevant "
+            "fact; the server will keep the proposal in review when alternatives exist. Cite one fact per ordinary "
+            "link. Do not map a generic document date to an effective date. "
+            "Never cite an ID absent from the supplied context, invent evidence, or propose a value for a forbidden "
+            "signature/action target. The server validates target types, choices, native write constraints, and "
+            "provenance before rendering. Located uncertain or conflicting facts may still be proposed for human review."
+        ), validate_output=validate_refs,
+    )
+    proposals_by_target = {proposal.target_field_id: proposal for proposal in result.output.proposals}
+    agency_hash = hashlib.sha256(json.dumps(
+        [fact for fact in fact_rows if fact["source_kind"] == "agency"],
+        sort_keys=True, separators=(",", ":"), default=str,
+    ).encode()).hexdigest()
+    profile_hash = mapping_profile_hash(
+        model=result.model, reasoning_effort=gateway.settings.openai_reasoning_effort,
+        prompt_version=result.prompt_version, schema_version=result.schema_version,
+        mapper_version=MODEL_MAPPER_VERSION, agency_facts_hash=agency_hash,
+    )
+    targets: list[dict[str, Any]] = []
+    issue_list: list[dict[str, Any]] = []
+    for field in fields:
+        field_id = field["id"]
+        writable = bool(field.get("writable", True)) and field.get("field_type") not in {"signature", "action"}
+        issues: list[dict[str, Any]] = []
+        candidate = None
+        candidate_options: list[dict[str, Any]] = []
+        proposal = proposals_by_target.get(field_id)
+        if proposal is not None and writable and not _is_prefilled(field.get("current_value")):
+            sources = [facts_by_id[item] for item in proposal.evidence_fact_ids]
+            if not sources and proposal.source_block_ids:
+                cited_blocks = set(proposal.source_block_ids)
+                sources = [fact for fact in fact_rows if cited_blocks.intersection(set(fact.get("source_block_ids") or []))]
+            fact_ids = list(proposal.evidence_fact_ids)
+            alternate_sources: list[dict[str, Any]] = []
+            transformation = proposal.transformation
+            try:
+                if not sources or any(not source.get("provenance") for source in sources):
+                    raise DerivationError("Proposal lacks located source evidence")
+                if transformation is None and len(sources) > 1:
+                    ranked_sources = sorted(sources, key=lambda source: _match_score(field, source), reverse=True)
+                    sources = ranked_sources[:1]
+                    fact_ids = [sources[0]["id"]]
+                    alternate_sources = ranked_sources[1:]
+                source_roles = {str(source.get("entity_role") or "").casefold() for source in sources}
+                target_role = _target_role(field)
+                role_aliases = {"applicant": "business", "insured": "business", "company": "business"}
+                role_mismatch = bool(target_role and source_roles and any(
+                    role_aliases.get(role, role) != role_aliases.get(target_role, target_role)
+                    for role in source_roles if role
+                ))
+                if transformation is None:
+                    if len(sources) != 1:
+                        raise DerivationError("Direct links must cite exactly one fact")
+                    if proposal.canonical_value is None:
+                        canonical, method, normalization_issues = _normalize(field, sources[0].get("value"))
+                    else:
+                        canonical, method, normalization_issues = proposal.canonical_value, "model", []
+                    if field.get("field_type") == "boolean" and _decimal(sources[0].get("value")) is not None:
+                        raise DerivationError("Coverage amount requires the coverage_control transformation")
+                    if normalization_issues:
+                        raise DerivationError("; ".join(normalization_issues))
+                    mapping_method = method
+                elif transformation.operation == "address_component":
+                    if len(sources) != 1:
+                        raise DerivationError("Address splitting must cite one full address fact")
+                    canonical = _address_component(sources[0].get("value"), transformation.component or "")
+                    if canonical in (None, ""):
+                        raise DerivationError("Requested address component could not be located")
+                    mapping_method = "derived"
+                elif transformation.operation == "count_records":
+                    roles = {str(source.get("entity_role") or "").casefold() for source in sources}
+                    target_words = _tokens(f"{field.get('semantic_type') or ''} {field.get('label') or ''} {field.get('native_name') or ''}")
+                    applicant_driver_records = bool(target_words & {"driver", "drivers"}) and roles == {"applicant"} and all(_tokens(f"{source.get('key')} {source.get('label')}") & {"person", "driver", "license", "licence"} for source in sources)
+                    if len(roles) != 1 or not roles.issubset({"driver", "vehicle"}) and not applicant_driver_records:
+                        raise DerivationError("Record counts must cite one driver or vehicle category")
+                    role = next(iter(roles))
+                    category = [fact for fact in fact_rows if fact.get("accepted", True) and str(fact.get("entity_role") or "").casefold() == role and (not applicant_driver_records or _tokens(f"{fact.get('key')} {fact.get('label')}") & {"person", "driver", "license", "licence"})]
+                    entity_ids = {fact.get("entity_id") for fact in category}
+                    if not entity_ids or None in entity_ids:
+                        raise DerivationError("Record count requires stable record IDs")
+                    if {source.get("entity_id") for source in sources} != entity_ids:
+                        raise DerivationError("Record count citations must cover every located record")
+                    canonical = len(entity_ids)
+                    fact_ids = list(dict.fromkeys(fact["id"] for fact in category))
+                    sources = [facts_by_id[item] for item in fact_ids]
+                    mapping_method = "derived"
+                elif transformation.operation == "coverage_control":
+                    if field.get("field_type") != "boolean" or len(sources) != 1:
+                        raise DerivationError("Coverage control needs one supporting fact and a boolean target")
+                    value = sources[0].get("value")
+                    amount = _decimal(value)
+                    affirmative = amount > 0 if amount is not None else str(value).strip().casefold() in {"yes", "true", "y", "covered", "active"}
+                    if amount is None and str(value).strip().casefold() not in {"yes", "true", "y", "covered", "active", "no", "false", "n", "none", "0", ""}:
+                        raise DerivationError("Coverage evidence does not establish an affirmative or negative state")
+                    canonical = bool(affirmative)
+                    mapping_method = "derived"
+                else:
+                    field_words = _tokens(f"{field.get('semantic_type') or ''} {field.get('label') or ''}")
+                    if not field_words & {"percent", "percentage"}:
+                        raise DerivationError("100 percent transformation requires a percentage target")
+                    roles = {str(source.get("entity_role") or "").casefold() for source in sources}
+                    if len(roles) != 1 or not roles.issubset({"business", "driver", "vehicle"}):
+                        raise DerivationError("Percentage evidence must identify one record category")
+                    role = next(iter(roles))
+                    entity_ids = {fact.get("entity_id") for fact in fact_rows if fact.get("accepted", True) and str(fact.get("entity_role") or "").casefold() == role}
+                    if len(entity_ids) != 1 or None in entity_ids:
+                        raise DerivationError("100 percent requires exactly one supported record")
+                    _validate_singleton_percentage_context(field, sources, fact_rows)
+                    canonical = 100
+                    mapping_method = "derived"
+                if mapping_method != "derived" and not all(_type_compatible(field.get("field_type", "unknown"), source) for source in sources):
+                    raise DerivationError("Cited fact type is incompatible with target")
+                write_value = proposal.native_write_value if proposal.native_write_value is not None else format_write_value(field, canonical)
+                write_issues = validate_write_value(field, canonical, write_value)
+                if write_issues:
+                    raise DerivationError("; ".join(write_issues))
+                source_confidence = min(float(source.get("confidence", 0)) for source in sources)
+                uncertainty = list(dict.fromkeys(reason for source in sources for reason in (source.get("uncertainty") or [])))
+                conflicts = any(source.get("contradicts") for source in sources)
+                unaccepted = any(not source.get("accepted", True) for source in sources)
+                reasons = []
+                if source_confidence < 0.95:
+                    reasons.append("Evidence confidence requires review")
+                if uncertainty or unaccepted:
+                    reasons.append("Located evidence is uncertain and requires review")
+                if conflicts:
+                    reasons.append("Evidence conflicts with another fact and requires review")
+                if alternate_sources:
+                    reasons.append("More than one located fact could support this field; choose after review")
+                if role_mismatch:
+                    reasons.append("Evidence entity differs from the expected target; confirm the match")
+                target_terms = _tokens(f"{field.get('semantic_type') or ''} {field.get('label') or ''} {field.get('native_name') or ''}")
+                if target_terms & {"current", "prior", "audited", "estimated", "projected"} and any(not source.get("period_context") for source in sources):
+                    reasons.append("Evidence does not establish the target reporting period")
+                if _is_prefilled(field.get("current_value")):
+                    reasons.append("Target already contains a prefilled value")
+                provenance = [location for source in sources for location in source.get("provenance", [])]
+                candidate_id = hashlib.sha1(f"{field_id}:{result.execution_id}:{fact_ids}:{canonical}:{write_value}".encode()).hexdigest()[:20]
+                candidate = {
+                    "id": candidate_id, "target_field_id": field_id,
+                    "snapshot_id": sources[0].get("snapshot_id"),
+                    "source_artifact_id": (provenance or [{}])[0].get("artifact_id"),
+                    "fact_id": fact_ids[0] if len(fact_ids) == 1 else None,
+                    "fact_key": sources[0].get("key"),
+                    "entity_id": sources[0].get("entity_id") if len({s.get("entity_id") for s in sources}) == 1 else None,
+                    "entity_role": sources[0].get("entity_role") if len(source_roles) == 1 else None,
+                    "value": canonical, "canonical_value": canonical, "write_value": write_value,
+                    "raw_value": " | ".join(str(source.get("raw_value") or source.get("value")) for source in sources),
+                    "value_type": sources[0].get("value_type", "text") if len(sources) == 1 else "derived",
+                    "unit": sources[0].get("unit") if len(sources) == 1 else None,
+                    "date_context": sources[0].get("date_context") if len(sources) == 1 else None,
+                    "period_context": sources[0].get("period_context") if len(sources) == 1 else None,
+                    "origin": "derivation" if mapping_method == "derived" else "agency" if all(source.get("source_kind") == "agency" for source in sources) else "evidence",
+                    "resolution": "derived" if mapping_method == "derived" else mapping_method,
+                    "mapping_method": mapping_method, "evidence_fact_ids": fact_ids,
+                    "evidence_confidence": source_confidence, "confidence": source_confidence,
+                    "rationale": proposal.rationale, "match_score": proposal.confidence,
+                    "mapping_confidence": proposal.confidence,
+                    "mapping_confidence_source": "model" if proposal.confidence is not None else None,
+                    "provenance": provenance,
+                    "evidence_sources": [{"fact_id": source["id"], "snapshot_id": source.get("snapshot_id"), "artifact_id": (source.get("provenance") or [{}])[0].get("artifact_id")} for source in sources],
+                    "uncertainty": uncertainty, "contradicts": [item for source in sources for item in source.get("contradicts", [])],
+                    "selectable": True, "review_required": bool(reasons),
+                    "approval_state": "needs_review" if reasons else "system_approved",
+                    "approval_actor": None if reasons else "system",
+                    "auto_approval_reasons": reasons if reasons else ["Located evidence, target type and native write constraints passed"],
+                    "mapping_execution_id": result.execution_id,
+                    "source_block_ids": list(proposal.source_block_ids),
+                    "derivation": ({"operation": transformation.operation, "component": transformation.component, "input_ids": fact_ids, "depth": 1} if transformation else None),
+                }
+                candidate_options = [candidate]
+                for alternative in alternate_sources:
+                    alt_value, alt_method, alt_issues = _normalize(field, alternative.get("value"))
+                    if alt_issues:
+                        continue
+                    alt_write = format_write_value(field, alt_value)
+                    if validate_write_value(field, alt_value, alt_write):
+                        continue
+                    alt_provenance = alternative.get("provenance", [])
+                    alt_id = hashlib.sha1(f"{field_id}:{result.execution_id}:{alternative['id']}:{alt_value}:{alt_write}".encode()).hexdigest()[:20]
+                    candidate_options.append({
+                        **candidate, "id": alt_id, "fact_id": alternative["id"],
+                        "fact_key": alternative.get("key"), "entity_id": alternative.get("entity_id"),
+                        "entity_role": alternative.get("entity_role"), "value": alt_value,
+                        "canonical_value": alt_value, "write_value": alt_write,
+                        "raw_value": str(alternative.get("raw_value") or alternative.get("value")),
+                        "value_type": alternative.get("value_type", "text"),
+                        "origin": "agency" if alternative.get("source_kind") == "agency" else "evidence",
+                        "resolution": alt_method, "mapping_method": alt_method,
+                        "evidence_fact_ids": [alternative["id"]],
+                        "evidence_confidence": float(alternative.get("confidence", 0)),
+                        "confidence": float(alternative.get("confidence", 0)),
+                        "provenance": alt_provenance,
+                        "evidence_sources": [{"fact_id": alternative["id"], "snapshot_id": alternative.get("snapshot_id"), "artifact_id": (alt_provenance or [{}])[0].get("artifact_id")}],
+                        "uncertainty": list(alternative.get("uncertainty", [])),
+                        "contradicts": list(alternative.get("contradicts", [])),
+                        "review_required": True, "approval_state": "needs_review", "approval_actor": None,
+                        "auto_approval_reasons": ["Alternative located evidence requires human selection"],
+                    })
+                if reasons:
+                    issues.append(_issue("mapping_review_required", "review", field_id, "; ".join(reasons)))
+            except (DerivationError, InvalidOperation, ValueError, ZeroDivisionError) as exc:
+                issues.append(_issue("invalid_model_proposal", "review", field_id, str(exc)))
+                candidate = None
+        elif proposal is None and writable and field.get("required"):
+            issues.append(_issue("required_field_blank", "blocker", field_id, "Required target has no located supporting evidence"))
+        elif not writable:
+            issues.append(_issue("forbidden_target", "blocker" if proposal else "info", field_id, "Target is not an approved writable business field"))
+        targets.append({"field": field, "selected_candidate_id": candidate["id"] if candidate else None,
+            "candidates": candidate_options if candidate else [], "issues": issues,
+            "state": "proposed" if candidate else ("not_applicable" if not writable else "unresolved"),
+            "approval_state": candidate["approval_state"] if candidate else "unresolved"})
+        issue_list.extend(issues)
+    repeating = _repeating_results(template_schema, targets)
+    for group in repeating:
+        if group["overflow_entity_ids"]:
+            issue_list.append(_issue("repeating_overflow", "blocker", group["id"], f"{len(group['overflow_entity_ids'])} record(s) exceed target capacity; all records were retained"))
+    return {"mapper_version": MODEL_MAPPER_VERSION, "mapping_profile_hash": profile_hash,
+        "model_profile": {"provider": "openai", "model": result.model,
+            "reasoning_effort": gateway.settings.openai_reasoning_effort,
+            "prompt_version": result.prompt_version, "schema_version": result.schema_version,
+            "execution_id": result.execution_id, "mapping_input_target_count": len(fields),
+            "mapping_input_fact_count": len(compact_facts)},
+        "template_schema": template_schema, "targets": targets, "repeating_groups": repeating,
+        "derivations": [], "issues": issue_list, "summary": _summary(targets, issue_list)}
+
 def _issue(code: str, severity: str, target_id: str, message: str) -> dict[str, Any]:
     return {"id": hashlib.sha1(f"{code}:{target_id}:{message}".encode()).hexdigest()[:16], "code": code, "severity": severity, "target_id": target_id, "message": message}
 
@@ -261,7 +1146,8 @@ def apply_revision(payload: dict[str, Any], selections: dict[str, str | None], d
                 raise ValueError(f"Candidate {candidate_id} is uncertain and cannot be selected silently")
         target["selected_candidate_id"] = candidate_id
         target["state"] = "proposed" if candidate_id else "unresolved"
-    derived, derivation_issues = evaluate_derivations(derivations, candidate_by_id)
+    field_context = {target["field"]["id"]: target["field"] for target in result["targets"]}
+    derived, derivation_issues = evaluate_derivations(derivations, candidate_by_id, field_context)
     for candidate in derived:
         target = target_by_id.get(candidate["target_field_id"])
         if target is None:
@@ -274,7 +1160,11 @@ def apply_revision(payload: dict[str, Any], selections: dict[str, str | None], d
     return result
 
 
-def evaluate_derivations(specs: list[dict[str, Any]], base_candidates: dict[str, dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def evaluate_derivations(
+    specs: list[dict[str, Any]],
+    base_candidates: dict[str, dict[str, Any]],
+    target_fields: dict[str, dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     by_id = {spec["id"]: spec for spec in specs}
     depths: dict[str, int] = {}
     visiting: set[str] = set()
@@ -311,6 +1201,37 @@ def evaluate_derivations(specs: list[dict[str, Any]], base_candidates: dict[str,
             if any(input_id not in values for input_id in spec["input_ids"]):
                 continue
             try:
+                operation = spec.get("operation")
+                if operation == "count_records":
+                    inputs = [base_candidates.get(input_id) for input_id in spec["input_ids"]]
+                    roles = {str(item.get("entity_role") or "").casefold() for item in inputs if item}
+                    if len(roles) != 1 or not roles.issubset({"driver", "vehicle"}):
+                        raise DerivationError("Record counts must cite one driver or vehicle category")
+                    role = next(iter(roles))
+                    all_entities = {
+                        item.get("entity_id")
+                        for item in base_candidates.values()
+                        if str(item.get("entity_role") or "").casefold() == role
+                    }
+                    cited_entities = {item.get("entity_id") for item in inputs if item}
+                    if None in all_entities or cited_entities != all_entities:
+                        raise DerivationError("Record count citations must cover each stable record exactly")
+                    spec = {**spec, "record_count": len(all_entities)}
+                elif operation == "singleton_percentage":
+                    field = (target_fields or {}).get(spec.get("target_field_id"), {})
+                    target_words = _tokens(f"{field.get('semantic_type') or ''} {field.get('label') or ''}")
+                    if not target_words & {"percent", "percentage"}:
+                        raise DerivationError("Singleton percentage requires a percentage target field")
+                    inputs = [base_candidates.get(input_id) for input_id in spec["input_ids"]]
+                    roles = {str(item.get("entity_role") or "").casefold() for item in inputs if item}
+                    if len(roles) != 1 or not roles.issubset({"business", "driver", "vehicle"}):
+                        raise DerivationError("Singleton percentage requires one supported record category")
+                    role = next(iter(roles))
+                    all_entities = {item.get("entity_id") for item in base_candidates.values() if str(item.get("entity_role") or "").casefold() == role}
+                    cited_entities = {item.get("entity_id") for item in inputs if item}
+                    if len(all_entities) != 1 or None in all_entities or cited_entities != all_entities:
+                        raise DerivationError("Singleton percentage requires exactly one cited record")
+                    spec = {**spec, "validated_singleton_percentage": True}
                 value = _derive(spec, [values[input_id] for input_id in spec["input_ids"]])
             except (DerivationError, InvalidOperation, ZeroDivisionError) as exc:
                 issues.append(_issue("invalid_derivation", "blocker", spec["target_field_id"], str(exc)))
@@ -354,8 +1275,24 @@ def evaluate_derivations(specs: list[dict[str, Any]], base_candidates: dict[str,
 
 def _derive(spec: dict[str, Any], values: list[Any]) -> Any:
     operation = spec["operation"]
+    if operation == "copy":
+        if len(values) != 1:
+            raise DerivationError("Copy derivation requires exactly one input")
+        return values[0]
     if operation == "concat":
         return spec.get("separator", " ").join(str(value) for value in values)
+    if operation == "address_component":
+        if len(values) != 1 or not spec.get("component"):
+            raise DerivationError("Address component derivation requires one address and a named component")
+        return _address_component(values[0], spec["component"])
+    if operation == "count_records":
+        if spec.get("record_count") is None:
+            raise DerivationError("Record count requires server-validated entity IDs")
+        return int(spec["record_count"])
+    if operation == "singleton_percentage":
+        if not spec.get("validated_singleton_percentage"):
+            raise DerivationError("Singleton percentage requires a server-validated percentage target and record")
+        return 100
     if operation == "date_diff_years":
         if len(values) != 1 or not spec.get("as_of_date"):
             raise DerivationError("Date-dependent derivation requires one date and an explicit as-of date")
@@ -381,3 +1318,36 @@ def _derive(spec: dict[str, Any], values: list[Any]) -> Any:
     else:
         raise DerivationError(f"Unsupported operands for {operation}")
     return int(result) if result == result.to_integral() else float(result)
+
+
+def _address_component(value: Any, component: str) -> Any:
+    key = re.sub(r"[^a-z]", "", component.casefold())
+    aliases = {
+        "addressline1": "street",
+        "streetaddress": "street",
+        "zipcode": "postalcode",
+        "zip": "postalcode",
+        "province": "state",
+        "region": "state",
+    }
+    key = aliases.get(key, key)
+    if isinstance(value, dict):
+        for original, item in value.items():
+            if re.sub(r"[^a-z]", "", str(original).casefold()) == key:
+                return item
+        raise DerivationError(f"Address has no {component} component")
+    parts = [part.strip() for part in re.sub(r"\s*\n\s*", ", ", str(value)).split(",") if part.strip()]
+    if key == "street" and parts:
+        return parts[0]
+    if key == "city" and len(parts) >= 3:
+        return parts[1]
+    if key == "state" and len(parts) >= 3:
+        for part in reversed(parts[-2:]):
+            match = re.search(r"\b([A-Za-z]{2})\b", part)
+            if match:
+                return match.group(1)
+    if key == "postalcode" and parts:
+        match = re.search(r"\b\d{5}(?:-\d{4})?\b", parts[-1])
+        if match:
+            return match.group(0)
+    raise DerivationError(f"Could not resolve address component {component}")

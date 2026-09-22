@@ -10,10 +10,21 @@ from sqlalchemy.orm import Session
 
 from app.agencies import AGENCY_SOURCE_VERSION, SEED_AGENCIES, agency_facts
 from app.config import get_settings
-from app.evidence import extract_evidence, native_parse
+from app.evidence import extract_evidence, extract_evidence_model, native_parse
 from app.evidence.retrieve import candidate_pools
 from app.inspectors import inspect_pdf, inspect_xlsx
-from app.mapping import MAPPER_VERSION, apply_revision, build_fill_plan
+from app.mapping import (
+    AGENCY_SNAPSHOT_ID,
+    MAPPER_VERSION,
+    MAPPING_PROMPT_VERSION,
+    MAPPING_SCHEMA_VERSION,
+    MODEL_MAPPER_VERSION,
+    apply_revision,
+    build_fill_plan,
+    build_model_fill_plan,
+    mapping_profile_hash,
+)
+from app.model_gateway import ModelGateway
 from app.models import (
     Agency,
     Artifact,
@@ -26,19 +37,13 @@ from app.models import (
     RunStatus,
     TemplateDraft,
     TemplateVersion,
-    VerificationReport,
     new_id,
 )
 from app.parsers.reducto import ReductoParserAdapter
 from app.review import apply_review_decision
 from app.schemas import TemplateSchema
 from app.storage import ObjectStorage
-from app.verification import (
-    DETERMINISTIC_VERSION,
-    VERIFIER_VERSION,
-    EvidenceAwareVerifier,
-    build_verification_report,
-)
+from app.verification import deterministic_validate
 
 
 class RevisionConflict(Exception):
@@ -87,7 +92,7 @@ def inspect_artifact(session: Session, storage: ObjectStorage, run_id: str) -> N
         run.result = schema
         draft = session.scalar(select(TemplateDraft).where(TemplateDraft.artifact_id == run.artifact_id))
         if draft:
-            draft.schema = schema
+            draft.schema = _reconcile_inspection_annotations(draft.schema, schema)
             draft.revision += 1
         else:
             draft = TemplateDraft(
@@ -109,6 +114,50 @@ def inspect_artifact(session: Session, storage: ObjectStorage, run_id: str) -> N
             run.finished_at = datetime.now(UTC)
             session.commit()
         raise
+
+
+def _reconcile_inspection_annotations(
+    previous_schema: dict, inspected_schema: dict
+) -> dict:
+    """Carry only explicit human annotations onto a fresh native inspection.
+
+    Geometry, widget identities, choices, and PDF constraints always come from
+    the new inspection. Semantic and label values inferred by an older inspector
+    are intentionally not copied because they may be stale after a parser fix.
+    """
+    result = dict(inspected_schema)
+    new_fields = [dict(field) for field in inspected_schema.get("fields", [])]
+    prior_by_identity: dict[str, dict] = {}
+    for field in previous_schema.get("fields", []):
+        identities = [field.get("native_full_name"), field.get("native_object_id"), field.get("id")]
+        for identity in identities:
+            if identity:
+                prior_by_identity[str(identity)] = field
+
+    for field in new_fields:
+        identities = [field.get("native_full_name"), field.get("native_object_id"), field.get("id")]
+        prior = next(
+            (prior_by_identity[str(identity)] for identity in identities if identity and str(identity) in prior_by_identity),
+            None,
+        )
+        if prior is None:
+            continue
+        if prior.get("label_origin") == "human":
+            field["label"] = prior.get("label")
+            field["label_origin"] = "human"
+        if prior.get("semantic_type_origin") == "human":
+            field["semantic_type"] = prior.get("semantic_type")
+            field["semantic_type_origin"] = "human"
+        if prior.get("notes"):
+            field["notes"] = prior["notes"]
+        # Keep a user-configured output date format only when the new field is
+        # still date-like. Native inspection constraints otherwise win.
+        old_constraints = prior.get("constraints") or {}
+        new_constraints = field.get("constraints") or {}
+        if old_constraints.get("date_format") and new_constraints.get("format_hint") == "date":
+            field["constraints"] = {**new_constraints, "date_format": old_constraints["date_format"]}
+    result["fields"] = new_fields
+    return result
 
 
 def ingest_evidence(session: Session, storage: ObjectStorage, run_id: str) -> None:
@@ -160,13 +209,24 @@ def ingest_evidence(session: Session, storage: ObjectStorage, run_id: str) -> No
         run.parser_version = parsed.parser_version
         run.raw_result = parsed.raw
         session.commit()
-        payload = extract_evidence(
-            parsed.blocks,
-            run.artifact_id,
-            run.artifact.sha256,
-            provider,
-            parsed.parser_version,
-        )
+        if allow_native_fallback:
+            payload = extract_evidence(
+                parsed.blocks,
+                run.artifact_id,
+                run.artifact.sha256,
+                provider,
+                parsed.parser_version,
+            )
+        else:
+            payload = extract_evidence_model(
+                parsed.blocks,
+                run.artifact_id,
+                run.artifact.sha256,
+                provider,
+                parsed.parser_version,
+                session=session,
+                run_id=run.id,
+            )
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
         snapshot_hash = hashlib.sha256(canonical).hexdigest()
         snapshot = session.scalar(
@@ -260,6 +320,31 @@ def resolve_agency(session: Session, agency_key: str | None) -> Agency:
     if agency is None:
         raise ValueError("No default agency is configured")
     return agency
+
+
+def fill_plan_profile_identity(
+    session: Session, agency_key: str | None, gateway: ModelGateway | None = None
+) -> tuple[str, str]:
+    """Return immutable plan profile and mapper profile hashes."""
+    settings = gateway.settings if gateway is not None else get_settings()
+    agency = resolve_agency(session, agency_key)
+    facts = agency_facts({"key": agency.key, "name": agency.name, "details": agency.details})
+    agency_rows = [
+        {**fact, "snapshot_id": AGENCY_SNAPSHOT_ID, "source_kind": "agency"}
+        for fact in facts
+    ]
+    agency_hash = hashlib.sha256(
+        json.dumps(agency_rows, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()
+    mapping_hash = mapping_profile_hash(
+        model=settings.openai_mapping_model,
+        reasoning_effort=settings.openai_reasoning_effort,
+        prompt_version=MAPPING_PROMPT_VERSION,
+        schema_version=MAPPING_SCHEMA_VERSION,
+        mapper_version=MODEL_MAPPER_VERSION,
+        agency_facts_hash=agency_hash,
+    )
+    return mapping_hash, mapping_hash
 
 
 def new_case_key(session: Session) -> str:
@@ -380,6 +465,212 @@ def create_fill_plan(
     return fill_plan
 
 
+def create_model_fill_plan(
+    session: Session,
+    *,
+    run_id: str,
+    case_key: str,
+    template_version: TemplateVersion,
+    snapshot_ids: list[str] | None = None,
+    agency_key: str | None = None,
+    gateway: ModelGateway | None = None,
+) -> FillPlan:
+    """Create a mapped plan in one transaction using frozen evidence snapshots.
+
+    Model execution traces are stored independently by ModelGateway; the
+    evidence bundle and Fill Plan revision commit after mapping succeeds.
+    """
+    gateway = gateway or ModelGateway()
+    agency = resolve_agency(session, agency_key)
+    snapshots = _resolve_fill_plan_snapshots(session, case_key, snapshot_ids)
+    ordered = sorted(snapshots, key=lambda item: item.id)
+    bundle_material = [{"id": item.id, "sha256": item.snapshot_sha256} for item in ordered]
+    bundle_hash = hashlib.sha256(
+        json.dumps(bundle_material, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    bundle = session.scalar(
+        select(EvidenceBundle).where(
+            EvidenceBundle.case_key == case_key,
+            EvidenceBundle.bundle_sha256 == bundle_hash,
+        )
+    )
+    if bundle is None:
+        bundle = EvidenceBundle(
+            id=new_id(),
+            case_key=case_key,
+            snapshot_ids=[item.id for item in ordered],
+            bundle_sha256=bundle_hash,
+        )
+
+    agency_payload = agency_facts(
+        {"key": agency.key, "name": agency.name, "details": agency.details}
+    )
+    profile_hash, mapping_hash = fill_plan_profile_identity(session, agency.key, gateway)
+    model = gateway.model_for("mapping")
+    existing = session.scalar(
+        select(FillPlan).where(
+            FillPlan.template_version_id == template_version.id,
+            FillPlan.evidence_bundle_id == bundle.id,
+            FillPlan.agency_key == agency.key,
+            FillPlan.mapping_profile_hash == profile_hash,
+        )
+    )
+    if existing:
+        return existing
+
+    payload = build_model_fill_plan(
+        template_version.schema,
+        [(item.id, {**item.snapshot, "_artifact_id": item.artifact_id}) for item in ordered],
+        agency_payload,
+        session=session,
+        run_id=run_id,
+        gateway=gateway,
+    )
+    if payload.get("mapping_profile_hash") != mapping_hash:
+        raise RuntimeError("Mapping profile hash differs from the persisted Fill Plan profile identity")
+    payload["evidence_bundle"] = {
+        "id": bundle.id, "case_key": case_key,
+        "snapshot_ids": bundle.snapshot_ids, "sha256": bundle.bundle_sha256,
+    }
+    payload["template_version"] = {
+        "id": template_version.id, "version": template_version.version,
+        "schema_sha256": template_version.schema_sha256,
+    }
+    payload["agency"] = {"key": agency.key, "name": agency.name, "source_version": AGENCY_SOURCE_VERSION}
+    payload["processing_run_id"] = run_id
+    payload["model_profile"] = {
+        **payload.get("model_profile", {}), "mapping_profile_hash": mapping_hash,
+        "profile_hash": profile_hash, "mapping_model": model,
+        "mapping_prompt_version": MAPPING_PROMPT_VERSION,
+        "mapping_schema_version": MAPPING_SCHEMA_VERSION,
+        "mapper_version": MODEL_MAPPER_VERSION,
+    }
+    validation = deterministic_validate(payload)
+    payload["validation"] = validation
+    known = {(item.get("target_id"), item["code"]) for item in payload.get("issues", [])}
+    already_required = {target_id for target_id, code in known if code == "required_field_blank"}
+    for finding in validation["findings"]:
+        if finding["code"] == "required_value_missing" and finding.get("target_id") in already_required:
+            continue
+        key = (finding.get("target_id"), finding["code"])
+        if key not in known:
+            payload.setdefault("issues", []).append({
+                "id": finding["id"], "code": finding["code"],
+                "severity": finding["severity"], "target_id": finding.get("target_id"),
+                "message": finding["message"],
+            })
+            known.add(key)
+    payload["summary"] = {
+        "target_count": len(payload.get("targets", [])),
+        "proposed_count": sum(target.get("selected_candidate_id") is not None for target in payload.get("targets", [])),
+        "unresolved_count": sum(target.get("state") == "unresolved" for target in payload.get("targets", [])),
+        "issue_count": len(payload.get("issues", [])),
+        "blocker_count": sum(issue.get("severity") == "blocker" for issue in payload.get("issues", [])),
+    }
+
+    fill_plan = FillPlan(
+        case_key=case_key, agency_key=agency.key,
+        template_version_id=template_version.id,
+        evidence_bundle_id=bundle.id, mapping_profile_hash=profile_hash,
+    )
+    if session.get(EvidenceBundle, bundle.id) is None:
+        session.add(bundle)
+    session.add(fill_plan)
+    session.flush()
+    session.add(_fill_plan_revision(fill_plan.id, 1, payload))
+    return fill_plan
+
+
+def _resolve_fill_plan_snapshots(
+    session: Session, case_key: str, snapshot_ids: list[str] | None
+) -> list[EvidenceSnapshot]:
+    if snapshot_ids is None:
+        rows = session.execute(
+            select(EvidenceSnapshot, Artifact)
+            .join(Artifact, EvidenceSnapshot.artifact_id == Artifact.id)
+            .where(Artifact.case_key == case_key)
+            .order_by(EvidenceSnapshot.created_at.desc(), EvidenceSnapshot.id.desc())
+        ).all()
+        latest_by_artifact: dict[str, EvidenceSnapshot] = {}
+        for snapshot, artifact in rows:
+            latest_by_artifact.setdefault(artifact.id, snapshot)
+        snapshots = list(latest_by_artifact.values())
+    else:
+        snapshots = list(
+            session.scalars(
+                select(EvidenceSnapshot).where(EvidenceSnapshot.id.in_(snapshot_ids))
+            ).all()
+        )
+        if len(snapshots) != len(set(snapshot_ids)):
+            raise ValueError("One or more evidence snapshots were not found")
+        artifacts = list(
+            session.scalars(
+                select(Artifact).where(
+                    Artifact.id.in_([item.artifact_id for item in snapshots])
+                )
+            ).all()
+        )
+        if len(artifacts) != len(snapshots) or any(
+            artifact.case_key != case_key for artifact in artifacts
+        ):
+            raise ValueError("Evidence snapshots must all belong to the requested case")
+    if not snapshots:
+        raise ValueError(f"Case {case_key} has no evidence snapshots")
+    return snapshots
+
+
+def run_fill_plan_job(session: Session, run_id: str, gateway: ModelGateway | None = None) -> None:
+    """Execute one queued Fill Plan run and atomically publish its artifacts."""
+    run = session.get(ProcessingRun, run_id)
+    if run is None:
+        raise KeyError(run_id)
+    config = dict(run.config_snapshot or {})
+    if config.get("operation") != "fill_plan":
+        raise ValueError("Processing run is not a Fill Plan operation")
+    run.status = RunStatus.RUNNING
+    run.stage = "mapping"
+    run.progress = 15
+    run.started_at = datetime.now(UTC)
+    run.error = None
+    session.commit()
+    try:
+        version = session.get(TemplateVersion, config["template_version_id"])
+        if version is None:
+            raise ValueError("Published template version no longer exists")
+        run.stage = "mapping"
+        run.progress = 20
+        session.commit()
+        plan = create_model_fill_plan(
+            session,
+            run_id=run.id,
+            case_key=config["case_key"],
+            template_version=version,
+            snapshot_ids=config.get("evidence_snapshot_ids"),
+            agency_key=config.get("agency_key"),
+            gateway=gateway,
+        )
+        run.stage = "complete"
+        run.progress = 95
+        run.result = {"fill_plan_id": plan.id}
+        run.status = RunStatus.SUCCEEDED
+        run.stage = "complete"
+        run.progress = 100
+        run.finished_at = datetime.now(UTC)
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        failed = session.get(ProcessingRun, run_id)
+        if failed is not None:
+            failed.status = RunStatus.FAILED
+            failed.stage = "failed"
+            failed.error = f"{type(exc).__name__}: {exc}"
+            failed.result = None
+            failed.finished_at = datetime.now(UTC)
+            session.commit()
+        # Keep the failure visible in GET /processing-runs, rather than
+        # bubbling into BackgroundTasks and obscuring the committed run state.
+
+
 def revise_fill_plan(
     session: Session,
     fill_plan: FillPlan,
@@ -486,80 +777,7 @@ def _fill_plan_revision(fill_plan_id: str, revision: int, payload: dict) -> Fill
     return FillPlanRevision(
         fill_plan_id=fill_plan_id,
         revision=revision,
-        mapper_version=MAPPER_VERSION,
+        mapper_version=payload.get("mapper_version", MAPPER_VERSION),
         payload_sha256=hashlib.sha256(canonical).hexdigest(),
         payload=payload,
     )
-
-
-def verify_fill_plan_revision(
-    session: Session, fill_plan: FillPlan, revision_number: int | None = None
-) -> VerificationReport:
-    number = revision_number or fill_plan.current_revision
-    revision = session.scalar(
-        select(FillPlanRevision).where(
-            FillPlanRevision.fill_plan_id == fill_plan.id,
-            FillPlanRevision.revision == number,
-        )
-    )
-    if revision is None:
-        raise ValueError(f"Fill Plan revision {number} was not found")
-    existing = session.scalar(
-        select(VerificationReport).where(
-            VerificationReport.fill_plan_revision_id == revision.id,
-            VerificationReport.verifier_version == VERIFIER_VERSION,
-        )
-    )
-    if existing:
-        return existing
-    bundle = session.get(EvidenceBundle, fill_plan.evidence_bundle_id)
-    if bundle is None:
-        raise ValueError("Frozen evidence bundle is missing")
-    snapshots_by_id = {
-        item.id: item
-        for item in session.scalars(
-            select(EvidenceSnapshot).where(EvidenceSnapshot.id.in_(bundle.snapshot_ids))
-        ).all()
-    }
-    if set(snapshots_by_id) != set(bundle.snapshot_ids):
-        raise ValueError("Frozen evidence bundle is incomplete")
-    verifier = EvidenceAwareVerifier()
-    result = build_verification_report(
-        revision.payload,
-        [snapshots_by_id[snapshot_id].snapshot for snapshot_id in bundle.snapshot_ids],
-        verifier,
-    )
-    input_material = {
-        "fill_plan_revision_sha256": revision.payload_sha256,
-        "evidence_bundle_sha256": bundle.bundle_sha256,
-        "deterministic_version": DETERMINISTIC_VERSION,
-        "verifier_version": verifier.version,
-    }
-    input_hash = hashlib.sha256(
-        json.dumps(input_material, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-    result["trace"] = {
-        **input_material,
-        "provider": verifier.provider,
-        "model": verifier.model,
-        "prompt_version": "verification-contract-v1",
-        "schema_version": "verification-report-v1",
-    }
-    report_hash = hashlib.sha256(
-        json.dumps(result, sort_keys=True, separators=(",", ":"), default=str).encode()
-    ).hexdigest()
-    report = VerificationReport(
-        fill_plan_revision_id=revision.id,
-        status=result["status"],
-        deterministic_version=DETERMINISTIC_VERSION,
-        verifier_version=verifier.version,
-        provider=verifier.provider,
-        model=verifier.model,
-        input_sha256=input_hash,
-        report_sha256=report_hash,
-        report=result,
-    )
-    session.add(report)
-    session.commit()
-    session.refresh(report)
-    return report

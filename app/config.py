@@ -14,6 +14,14 @@ class Settings(BaseSettings):
     reducto_api_key: str | None = None
     reducto_base_url: str = "https://platform.reducto.ai"
     evidence_require_reducto: bool = True
+    openai_api_key: str | None = None
+    openai_base_url: str | None = None
+    openai_evidence_model: str = "gpt-6-sol"
+    openai_mapping_model: str = "gpt-6-sol"
+    openai_reasoning_effort: str = "medium"
+    openai_service_tier: str = "priority"
+    model_gateway_max_retries: int = 2
+    model_gateway_timeout_seconds: float = 300.0
     s3_endpoint_url: str = "http://localhost:9000"
     s3_access_key: str = "formfiller"
     s3_secret_key: str = "formfiller-local-secret"
