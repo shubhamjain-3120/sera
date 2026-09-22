@@ -21,6 +21,7 @@ OutputT = TypeVar("OutputT", bound=BaseModel)
 PROMPT_VERSIONS = {"evidence": "evidence-extraction-v1", "mapping": "mapping-v1"}
 SCHEMA_VERSIONS = {"evidence": "evidence-facts-v1", "mapping": "mapping-v1"}
 RETRYABLE = (APIConnectionError, APITimeoutError, InternalServerError, RateLimitError)
+FAST_SERVICE_TIERS = frozenset({"fast", "priority"})
 
 
 @dataclass(frozen=True)
@@ -193,10 +194,15 @@ class ModelGateway:
                 response_id = getattr(response, "id", None)
                 refusal, incomplete, usage = _response_details(response)
                 actual_service_tier = getattr(response, "service_tier", None)
-                if actual_service_tier != self.settings.openai_service_tier:
+                requested_service_tier = self.settings.openai_service_tier
+                fast_tier_match = (
+                    requested_service_tier in FAST_SERVICE_TIERS
+                    and actual_service_tier in FAST_SERVICE_TIERS
+                )
+                if actual_service_tier != requested_service_tier and not fast_tier_match:
                     error = (
                         "OpenAI served the request with service tier "
-                        f"{actual_service_tier!r}; requested {self.settings.openai_service_tier!r}"
+                        f"{actual_service_tier!r}; requested {requested_service_tier!r}"
                     )
                 elif refusal:
                     error = "Model refused the request"
