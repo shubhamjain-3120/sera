@@ -1,5 +1,8 @@
 # Formwork — AI Form Filler
 
+The canonical phased roadmap and acceptance gates are documented in
+[`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md). Consult it before starting each phase.
+
 Phase 1 implements target ingestion and the Template Inspector. Phase 2 adds isolated source ingestion and an Evidence Inspector for PDF, images, XLSX, and raw text. Originals remain immutable and content-addressed. Target mapping, review-to-target workflows, and final output generation are intentionally not present yet.
 
 ## What is implemented
