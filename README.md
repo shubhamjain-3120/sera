@@ -13,7 +13,7 @@ Phase 1 implements target ingestion and the Template Inspector. It keeps uploade
 
 PDF fields retain their native identity separately from their proposed human-readable label. Every layout proposal records confidence and the exact nearby text rectangles that produced it. Proposals remain in `needs_review` state; editing a label records it as a human-confirmed value. The system intentionally does not invent semantic ontology identifiers when only a nearby visual label is known.
 
-Page widgets are reconciled into logical fields by their AcroForm parent. A Yes/No control with two widgets is one field with an explicit visible-choice-to-PDF-export-value mapping, not two unrelated business fields.
+Inherited page widgets are reconciled through their terminal AcroForm parent. Widgets that carry their own `/T` or `/FT` remain distinct terminal fields even when they share a structural parent. A Yes/No control with two inherited widgets is therefore one logical field, while sibling text cells in a table remain independent.
 
 The two supplied ZIPs and any extracted customer documents are ignored by Git. Filled reference outputs are not used by the application or test evidence.
 
@@ -73,6 +73,6 @@ The original targets were inspected directly in-memory from the supplied archive
 |---|---|
 | Elite workbook | 5 sheets (2 hidden, 2 protected), 35 defined names, 2 standard + 22 x14 validations |
 | Rivington driver/vehicle workbook | 3 sheets (1 hidden), 2 tables, 26 defined names, 1 standard + 12 x14 validations; existing broken validation exposed |
-| Rivington supplemental PDF | 2 pages, 486 field-tree entries, 407 widgets reconciled into 326 widget-backed logical fields, 3 excluded non-business controls |
+| Rivington supplemental PDF | 2 pages, 486 field-tree entries, 407 widgets reconciled into 380 widget-backed logical fields, 3 excluded non-business controls |
 
 These are structural measurements, not claims about independent business-field accuracy.

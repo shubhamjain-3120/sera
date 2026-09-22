@@ -59,3 +59,14 @@ def test_question_cleanup_discards_adjacent_yes_no_text():
         _clean_question("No Does applicant allow others to operate under their authority?")
         == "Does applicant allow others to operate under their authority?"
     )
+
+
+def test_text_inside_widget_beats_neighboring_left_cell():
+    target = field("1", "text", [171, 301, 293, 316])
+    blocks = [
+        LayoutBlock(1, "Catering Business", 35, 479, 96, 489),
+        LayoutBlock(1, "Florist", 174, 479, 196, 489),
+    ]
+    enrich_fields([target], blocks)
+    assert target["label"] == "Florist"
+    assert target["label_evidence"][0]["relation"] == "field_text"

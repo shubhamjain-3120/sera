@@ -53,7 +53,15 @@ def inspect_pdf(
             flags = int(annot.get("/Ff") or parent.get("/Ff") or 0)
             kind = _field_type(field_code, flags)
             rect = [float(value) for value in annot.get("/Rect", [0, 0, 0, 0])]
-            if parent_ref is not None and hasattr(parent_ref, "idnum"):
+            # A widget with its own /T or /FT is itself a terminal field. Its
+            # parent can be a non-terminal hierarchy node shared by unrelated
+            # siblings (as in the operations-category percentage grid). Only
+            # inherited widgets, such as radio/Yes-No appearances, should be
+            # reconciled through their terminal parent.
+            widget_is_terminal = annot.get("/T") is not None or annot.get("/FT") is not None
+            if widget_is_terminal and hasattr(annot_ref, "idnum"):
+                key = f"widget:{annot_ref.idnum}"
+            elif parent_ref is not None and hasattr(parent_ref, "idnum"):
                 key = f"parent:{parent_ref.idnum}"
             elif hasattr(annot_ref, "idnum"):
                 key = f"widget:{annot_ref.idnum}"

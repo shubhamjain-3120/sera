@@ -207,6 +207,13 @@ def _propose_label(
     center = (top + bottom) / 2
     clean_blocks = [block for block in blocks if _useful(block.text)]
 
+    inside = [
+        block
+        for block in clean_blocks
+        if x0 <= (block.x0 + block.x1) / 2 <= x1
+        and top <= (block.top + block.bottom) / 2 <= bottom
+    ]
+
     right = [
         block
         for block in clean_blocks
@@ -239,6 +246,17 @@ def _propose_label(
                 option.as_evidence("option_label"),
             ]
         return _truncate(option.text), 0.92, [option.as_evidence("option_label")]
+    # Some generated forms place a terminal text widget over its visible,
+    # fixed category caption. That caption is stronger evidence than the
+    # neighboring cell to the left.
+    if field["field_type"] == "text" and inside:
+        embedded_label = min(
+            inside,
+            key=lambda block: abs((block.top + block.bottom) / 2 - center),
+        )
+        return _truncate(embedded_label.text), 0.94, [
+            embedded_label.as_evidence("field_text")
+        ]
     if left_label:
         return _truncate(left_label.text), 0.9, [left_label.as_evidence("left_label")]
     if above_label:

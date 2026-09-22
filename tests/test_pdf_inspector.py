@@ -106,3 +106,36 @@ def test_widgets_with_the_same_parent_are_one_logical_field():
     assert len(result["fields"]) == 1
     assert result["fields"][0]["widget_count"] == 2
     assert len(result["fields"][0]["widgets"]) == 2
+
+
+def test_terminal_widget_siblings_under_structural_parent_remain_distinct():
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    structural_parent = DictionaryObject(
+        {
+            NameObject("/T"): TextStringObject("category-row"),
+            NameObject("/Kids"): ArrayObject(),
+        }
+    )
+    parent_reference = writer._add_object(structural_parent)
+    for name, rect in (("0", [10, 10, 20, 20]), ("1", [30, 10, 40, 20])):
+        annotation = writer.add_annotation(
+            0,
+            {
+                "/Type": "/Annot",
+                "/Subtype": "/Widget",
+                "/FT": "/Tx",
+                "/T": name,
+                "/Rect": rect,
+                "/Parent": parent_reference,
+            },
+        )
+        structural_parent["/Kids"].append(annotation.indirect_reference)
+    output = io.BytesIO()
+    writer.write(output)
+
+    result = inspect_pdf(io.BytesIO(output.getvalue()))
+    assert result["inspection"]["widget_count"] == 2
+    assert result["inspection"]["logical_field_count"] == 2
+    assert [field["native_name"] for field in result["fields"]] == ["0", "1"]
+    assert all(field["widget_count"] == 1 for field in result["fields"])
