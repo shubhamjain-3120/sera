@@ -1,5 +1,6 @@
 import hashlib
 import json
+import time
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -8,8 +9,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.evidence import extract_evidence, native_parse
 from app.inspectors import inspect_pdf, inspect_xlsx
-from app.models import ProcessingRun, RunStatus, TemplateDraft, TemplateVersion
+from app.models import EvidenceSnapshot, ProcessingRun, RunStatus, TemplateDraft, TemplateVersion
 from app.parsers.reducto import ReductoParserAdapter
 from app.schemas import TemplateSchema
 from app.storage import ObjectStorage
@@ -71,6 +73,96 @@ def inspect_artifact(session: Session, storage: ObjectStorage, run_id: str) -> N
             )
             session.add(draft)
         run.status = RunStatus.SUCCEEDED
+        run.progress = 100
+        run.finished_at = datetime.now(UTC)
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        run = session.get(ProcessingRun, run_id)
+        if run:
+            run.status = RunStatus.FAILED
+            run.error = f"{type(exc).__name__}: {exc}"
+            run.finished_at = datetime.now(UTC)
+            session.commit()
+        raise
+
+
+def ingest_evidence(session: Session, storage: ObjectStorage, run_id: str) -> None:
+    """Parse first, then perform semantic extraction into one immutable snapshot."""
+    run = session.get(ProcessingRun, run_id)
+    if not run:
+        raise KeyError(run_id)
+    run.status = RunStatus.RUNNING
+    run.stage = "parsing"
+    run.progress = 8
+    run.started_at = datetime.now(UTC)
+    session.commit()
+    try:
+        with storage.open(run.artifact.storage_key) as source:
+            content = source.read()
+        settings = get_settings()
+        allow_native_fallback = bool(run.config_snapshot.get("allow_native_fallback", False))
+        if settings.reducto_api_key:
+            adapter = ReductoParserAdapter(settings.reducto_api_key, settings.reducto_base_url)
+            job_id = adapter.submit(run.artifact.filename, content)
+            run.provider_job_id = job_id
+            run.provider = "reducto"
+            session.commit()
+            # Reducto queues larger/scanned documents asynchronously. Allow up to
+            # two minutes before marking the ingestion run as timed out.
+            for _ in range(240):
+                candidate = adapter.poll(job_id)
+                if candidate is not None:
+                    parsed = candidate
+                    break
+                time.sleep(0.5)
+            else:
+                raise TimeoutError("Reducto parse did not finish within the ingestion window")
+            provider = "reducto"
+        elif allow_native_fallback:
+            parsed = native_parse(run.artifact.kind.value, content)
+            provider = "native-test-fallback"
+        else:
+            raise RuntimeError(
+                "Reducto is required for evidence ingestion. Configure REDUCTO_API_KEY; "
+                "native OCR is disabled for production evidence."
+            )
+        run.stage = "semantic-extraction"
+        run.progress = 65
+        run.provider = provider
+        run.parser_version = parsed.parser_version
+        run.raw_result = parsed.raw
+        session.commit()
+        payload = extract_evidence(
+            parsed.blocks,
+            run.artifact_id,
+            run.artifact.sha256,
+            provider,
+            parsed.parser_version,
+        )
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+        snapshot_hash = hashlib.sha256(canonical).hexdigest()
+        snapshot = session.scalar(
+            select(EvidenceSnapshot).where(
+                EvidenceSnapshot.artifact_id == run.artifact_id,
+                EvidenceSnapshot.snapshot_sha256 == snapshot_hash,
+            )
+        )
+        if snapshot is None:
+            snapshot = EvidenceSnapshot(
+                artifact_id=run.artifact_id,
+                run_id=run.id,
+                parser_provider=provider,
+                parser_version=parsed.parser_version,
+                extractor_version=payload["extractor_version"],
+                snapshot_sha256=snapshot_hash,
+                snapshot=payload,
+            )
+            session.add(snapshot)
+            session.flush()
+        run.result = {"snapshot_id": snapshot.id, **payload}
+        run.status = RunStatus.SUCCEEDED
+        run.stage = "complete"
         run.progress = 100
         run.finished_at = datetime.now(UTC)
         session.commit()

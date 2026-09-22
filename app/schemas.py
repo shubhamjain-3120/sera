@@ -79,6 +79,92 @@ class ArtifactResponse(BaseModel):
     draft_id: str
 
 
+class EvidenceSourceResponse(BaseModel):
+    id: str
+    filename: str
+    media_type: str
+    kind: str
+    purpose: str
+    case_key: str | None
+    sha256: str
+    size_bytes: int
+    created_at: datetime
+    run_id: str
+    snapshot_id: str | None = None
+
+
+class EvidenceLocation(BaseModel):
+    kind: Literal["pdf_rect", "image_rect", "xlsx_range", "text_span"]
+    artifact_id: str
+    page: int | None = None
+    rect: list[float] | None = None
+    coordinate_system: str | None = None
+    rotation: int | None = None
+    rotation_transform: list[float] | None = None
+    page_width: float | None = None
+    page_height: float | None = None
+    precision: str | None = None
+    sheet: str | None = None
+    cell_range: str | None = None
+    char_start: int | None = None
+    char_end: int | None = None
+    excerpt: str | None = None
+
+
+class EvidenceFact(BaseModel):
+    id: str
+    key: str
+    label: str
+    value: Any
+    raw_value: str
+    value_type: str = "text"
+    entity_id: str
+    entity_role: str
+    provenance: list[EvidenceLocation]
+    confidence: float = Field(ge=0, le=1)
+    uncertainty: list[str] = Field(default_factory=list)
+    unit: str | None = None
+    date_context: str | None = None
+    period_context: str | None = None
+    duplicate_of: str | None = None
+    contradicts: list[str] = Field(default_factory=list)
+    accepted: bool = True
+    semantics: list[str] = Field(default_factory=list)
+
+
+class UnreadableRegion(BaseModel):
+    id: str
+    reason: str
+    provenance: EvidenceLocation
+    confidence: float = Field(ge=0, le=1)
+
+
+class EvidenceSnapshotPayload(BaseModel):
+    facts: list[EvidenceFact] = Field(default_factory=list)
+    entities: list[dict[str, Any]] = Field(default_factory=list)
+    unreadable_regions: list[UnreadableRegion] = Field(default_factory=list)
+    parse_blocks: list[dict[str, Any]] = Field(default_factory=list)
+    parser_provider: str
+    parser_version: str
+    extractor_version: str
+    warnings: list[str] = Field(default_factory=list)
+    source_sha256: str
+
+
+class EvidenceSnapshotResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    artifact_id: str
+    run_id: str
+    parser_provider: str
+    parser_version: str
+    extractor_version: str
+    snapshot_sha256: str
+    snapshot: EvidenceSnapshotPayload
+    created_at: datetime
+
+
 class RunResponse(BaseModel):
     id: str
     artifact_id: str

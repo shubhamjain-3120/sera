@@ -7,6 +7,7 @@ export interface Location {
   rotation?: number;
   page_width?: number;
   page_height?: number;
+  coordinate_system?: string;
   sheet?: string;
   cell_range?: string;
 }
@@ -60,8 +61,85 @@ export interface Run {
   stage: string;
   progress: number;
   provider: string;
-  result?: TemplateSchema;
+  result?: Record<string, unknown>;
   error?: string;
+}
+
+export type EvidenceLocationKind = "pdf_rect" | "image_rect" | "xlsx_range" | "text_span";
+
+export interface EvidenceLocation {
+  kind: EvidenceLocationKind;
+  artifact_id: string;
+  page?: number;
+  rect?: number[];
+  coordinate_system?: string;
+  rotation?: number;
+  rotation_transform?: number[];
+  page_width?: number;
+  page_height?: number;
+  precision?: string;
+  sheet?: string;
+  cell_range?: string;
+  char_start?: number;
+  char_end?: number;
+  excerpt?: string;
+}
+
+export interface EvidenceFact {
+  id: string;
+  key: string;
+  label: string;
+  value: unknown;
+  raw_value: string;
+  value_type: string;
+  entity_id: string;
+  entity_role: string;
+  provenance: EvidenceLocation[];
+  confidence: number;
+  uncertainty: string[];
+  unit?: string | null;
+  date_context?: string | null;
+  period_context?: string | null;
+  duplicate_of?: string | null;
+  contradicts: string[];
+  accepted: boolean;
+  semantics: string[];
+}
+
+export interface EvidenceSnapshot {
+  id: string;
+  artifact_id: string;
+  run_id: string;
+  parser_provider: string;
+  parser_version: string;
+  extractor_version: string;
+  snapshot_sha256: string;
+  created_at: string;
+  snapshot: {
+    facts: EvidenceFact[];
+    entities: Array<{ id: string; role: string }>;
+    unreadable_regions: Array<{ id: string; reason: string; provenance: EvidenceLocation; confidence: number }>;
+    parse_blocks: Array<{ type: string; text: string; source: EvidenceLocation }>;
+    parser_provider: string;
+    parser_version: string;
+    extractor_version: string;
+    warnings: string[];
+    source_sha256: string;
+  };
+}
+
+export interface EvidenceSource {
+  id: string;
+  filename: string;
+  media_type: string;
+  kind: "pdf" | "xlsx" | "image" | "text";
+  purpose: "source";
+  case_key?: string | null;
+  sha256: string;
+  size_bytes: number;
+  created_at: string;
+  run_id: string;
+  snapshot_id?: string | null;
 }
 
 export interface Draft {

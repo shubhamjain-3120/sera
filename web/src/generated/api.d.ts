@@ -90,6 +90,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/evidence/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Evidence Sources */
+        get: operations["list_evidence_sources_api_v1_evidence_sources_get"];
+        put?: never;
+        /** Upload Evidence Source */
+        post: operations["upload_evidence_source_api_v1_evidence_sources_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evidence/snapshots/{snapshot_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Evidence Snapshot */
+        get: operations["get_evidence_snapshot_api_v1_evidence_snapshots__snapshot_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/processing-runs/{run_id}": {
         parameters: {
             query?: never;
@@ -192,6 +227,11 @@ export interface components {
             /** File */
             file: string;
         };
+        /** Body_upload_evidence_source_api_v1_evidence_sources_post */
+        Body_upload_evidence_source_api_v1_evidence_sources_post: {
+            /** File */
+            file: string;
+        };
         /** DraftResponse */
         DraftResponse: {
             /** Id */
@@ -221,6 +261,163 @@ export interface components {
             /** Name */
             name?: string | null;
             schema: components["schemas"]["TemplateSchema"];
+        };
+        /** EvidenceFact */
+        EvidenceFact: {
+            /** Id */
+            id: string;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Value */
+            value: unknown;
+            /** Raw Value */
+            raw_value: string;
+            /**
+             * Value Type
+             * @default text
+             */
+            value_type: string;
+            /** Entity Id */
+            entity_id: string;
+            /** Entity Role */
+            entity_role: string;
+            /** Provenance */
+            provenance: components["schemas"]["EvidenceLocation"][];
+            /** Confidence */
+            confidence: number;
+            /** Uncertainty */
+            uncertainty?: string[];
+            /** Unit */
+            unit?: string | null;
+            /** Date Context */
+            date_context?: string | null;
+            /** Period Context */
+            period_context?: string | null;
+            /** Duplicate Of */
+            duplicate_of?: string | null;
+            /** Contradicts */
+            contradicts?: string[];
+            /**
+             * Accepted
+             * @default true
+             */
+            accepted: boolean;
+            /** Semantics */
+            semantics?: string[];
+        };
+        /** EvidenceLocation */
+        EvidenceLocation: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "pdf_rect" | "image_rect" | "xlsx_range" | "text_span";
+            /** Artifact Id */
+            artifact_id: string;
+            /** Page */
+            page?: number | null;
+            /** Rect */
+            rect?: number[] | null;
+            /** Coordinate System */
+            coordinate_system?: string | null;
+            /** Rotation */
+            rotation?: number | null;
+            /** Rotation Transform */
+            rotation_transform?: number[] | null;
+            /** Page Width */
+            page_width?: number | null;
+            /** Page Height */
+            page_height?: number | null;
+            /** Precision */
+            precision?: string | null;
+            /** Sheet */
+            sheet?: string | null;
+            /** Cell Range */
+            cell_range?: string | null;
+            /** Char Start */
+            char_start?: number | null;
+            /** Char End */
+            char_end?: number | null;
+            /** Excerpt */
+            excerpt?: string | null;
+        };
+        /** EvidenceSnapshotPayload */
+        EvidenceSnapshotPayload: {
+            /** Facts */
+            facts?: components["schemas"]["EvidenceFact"][];
+            /** Entities */
+            entities?: {
+                [key: string]: unknown;
+            }[];
+            /** Unreadable Regions */
+            unreadable_regions?: components["schemas"]["UnreadableRegion"][];
+            /** Parse Blocks */
+            parse_blocks?: {
+                [key: string]: unknown;
+            }[];
+            /** Parser Provider */
+            parser_provider: string;
+            /** Parser Version */
+            parser_version: string;
+            /** Extractor Version */
+            extractor_version: string;
+            /** Warnings */
+            warnings?: string[];
+            /** Source Sha256 */
+            source_sha256: string;
+        };
+        /** EvidenceSnapshotResponse */
+        EvidenceSnapshotResponse: {
+            /** Id */
+            id: string;
+            /** Artifact Id */
+            artifact_id: string;
+            /** Run Id */
+            run_id: string;
+            /** Parser Provider */
+            parser_provider: string;
+            /** Parser Version */
+            parser_version: string;
+            /** Extractor Version */
+            extractor_version: string;
+            /** Snapshot Sha256 */
+            snapshot_sha256: string;
+            snapshot: components["schemas"]["EvidenceSnapshotPayload"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** EvidenceSourceResponse */
+        EvidenceSourceResponse: {
+            /** Id */
+            id: string;
+            /** Filename */
+            filename: string;
+            /** Media Type */
+            media_type: string;
+            /** Kind */
+            kind: string;
+            /** Purpose */
+            purpose: string;
+            /** Case Key */
+            case_key: string | null;
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Run Id */
+            run_id: string;
+            /** Snapshot Id */
+            snapshot_id?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -393,6 +590,16 @@ export interface components {
             inspection?: {
                 [key: string]: unknown;
             };
+        };
+        /** UnreadableRegion */
+        UnreadableRegion: {
+            /** Id */
+            id: string;
+            /** Reason */
+            reason: string;
+            provenance: components["schemas"]["EvidenceLocation"];
+            /** Confidence */
+            confidence: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -611,6 +818,103 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_evidence_sources_api_v1_evidence_sources_get: {
+        parameters: {
+            query?: {
+                case_key?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceSourceResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_evidence_source_api_v1_evidence_sources_post: {
+        parameters: {
+            query: {
+                case_key: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_evidence_source_api_v1_evidence_sources_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceSourceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_evidence_snapshot_api_v1_evidence_snapshots__snapshot_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                snapshot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceSnapshotResponse"];
                 };
             };
             /** @description Validation Error */

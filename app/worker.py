@@ -2,7 +2,7 @@ from celery import Celery
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.services import inspect_artifact
+from app.services import ingest_evidence, inspect_artifact
 from app.storage import get_storage
 
 settings = get_settings()
@@ -14,3 +14,8 @@ def inspect_artifact_task(run_id: str) -> None:
     with SessionLocal() as session:
         inspect_artifact(session, get_storage(), run_id)
 
+
+@celery_app.task(name="ingest_evidence", autoretry_for=(Exception,), retry_backoff=True, max_retries=3)
+def ingest_evidence_task(run_id: str) -> None:
+    with SessionLocal() as session:
+        ingest_evidence(session, get_storage(), run_id)

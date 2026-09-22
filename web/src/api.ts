@@ -1,4 +1,4 @@
-import type { Artifact, Draft, Run, TemplateSchema } from "./types";
+import type { Artifact, Draft, EvidenceSnapshot, EvidenceSource, Run, TemplateSchema } from "./types";
 
 export const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -18,6 +18,14 @@ export const api = {
     body.append("file", file);
     return request<Artifact>("/api/v1/artifacts", { method: "POST", body });
   },
+  listEvidenceSources: () => request<EvidenceSource[]>("/api/v1/evidence/sources"),
+  uploadEvidenceSource: (file: File, caseKey?: string) => {
+    const body = new FormData();
+    body.append("file", file);
+    const query = caseKey ? `?case_key=${encodeURIComponent(caseKey)}` : "";
+    return request<EvidenceSource>(`/api/v1/evidence/sources${query}`, { method: "POST", body });
+  },
+  evidenceSnapshot: (id: string) => request<EvidenceSnapshot>(`/api/v1/evidence/snapshots/${id}`),
   run: (id: string) => request<Run>(`/api/v1/processing-runs/${id}`),
   draft: (id: string) => request<Draft>(`/api/v1/templates/${id}`),
   updateDraft: (id: string, revision: number, name: string, schema: TemplateSchema) =>

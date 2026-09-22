@@ -1,6 +1,6 @@
 # Formwork — AI Form Filler
 
-Phase 1 implements target ingestion and the Template Inspector. It keeps uploaded originals immutable, exposes native PDF/XLSX structure, allows field correction, and publishes immutable template versions. Evidence extraction, mapping, review, and final output generation are intentionally not present yet.
+Phase 1 implements target ingestion and the Template Inspector. Phase 2 adds isolated source ingestion and an Evidence Inspector for PDF, images, XLSX, and raw text. Originals remain immutable and content-addressed. Target mapping, review-to-target workflows, and final output generation are intentionally not present yet.
 
 ## What is implemented
 
@@ -9,11 +9,17 @@ Phase 1 implements target ingestion and the Template Inspector. It keeps uploade
 - Native PDF inspection with field-tree/widget reconciliation, exact rectangles, page rotation, signature/action exclusion, rendered previews, and geometry-based visible-label proposals.
 - Workbook inspection with hidden/protected sheets, formulas, merged ranges, tables, names, standard and x14 extended validations, broken-reference warnings, and relevant formatting in the grid.
 - A constrained OOXML preservation spike that modifies only the selected worksheet part and rejects formula replacement.
-- Reducto parsing when `REDUCTO_API_KEY` is configured, including URL-backed result handling and provider trace capture. Native `pdfplumber` layout extraction remains the offline fallback and `pypdf` widgets remain authoritative.
+- Reducto parsing when `REDUCTO_API_KEY` is configured, including URL-backed results, OCR word geometry, and provider trace capture. Native `pdfplumber` layout extraction remains the offline fallback and `pypdf` widgets remain authoritative for form targets.
 
 PDF fields retain their native identity separately from their proposed human-readable label. Every layout proposal records confidence and the exact nearby text rectangles that produced it. Proposals remain in `needs_review` state; editing a label records it as a human-confirmed value. The system intentionally does not invent semantic ontology identifiers when only a nearby visual label is known.
 
 Inherited page widgets are reconciled through their terminal AcroForm parent. Widgets that carry their own `/T` or `/FT` remain distinct terminal fields even when they share a structural parent. A Yes/No control with two inherited widgets is therefore one logical field, while sibling text cells in a table remain independent.
+
+- A Reducto asynchronous adapter boundary. Live evidence parsing requires a valid `REDUCTO_API_KEY`; native target inspection remains usable without it.
+- Separate source parsing and semantic extraction stages. Production evidence ingestion requires Reducto and never silently substitutes local OCR. Native parsing remains available only for deterministic tests, source-only evaluation, and structural inspection.
+- Immutable, content-hashed evidence snapshots with facts, entity roles, exact provenance, parser/extractor versions, date/unit context, confidence, uncertainty, duplicates, contradictions, and unreadable regions.
+- Canonical navigation for PDF and image rectangles, PDF rotation transforms, workbook sheet/cell ranges, and text character spans. Accepted facts always retain at least one exact source locator.
+- Untrusted-content controls: quoted email, signatures, and document-authored directions are not accepted as applicant facts or application instructions. Filled/reference outputs are rejected by the source endpoint.
 
 The two supplied ZIPs and any extracted customer documents are ignored by Git. Filled reference outputs are not used by the application or test evidence.
 
@@ -38,6 +44,10 @@ pnpm dev
 
 Open [http://localhost:5173](http://localhost:5173). API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs).
 
+Open `/evidence` for Phase 2 source ingestion. Choose the representative case before uploading so evidence stays isolated.
+
+Evidence ingestion requires `REDUCTO_API_KEY`. The API returns a clear `503` instead of producing lower-quality native OCR evidence when credentials are missing.
+
 For the intended service stack, install Docker Desktop or another Compose-compatible runtime and run `docker compose up --build`. This uses PostgreSQL, Redis, MinIO, the API, and a Celery worker.
 
 ## Automated verification
@@ -45,6 +55,7 @@ For the intended service stack, install Docker Desktop or another Compose-compat
 ```bash
 uv run ruff check app tests migrations
 uv run pytest -q
+uv run python -m scripts.evaluate_phase2 "/path/to/input and filled form 1.zip" "/path/to/input and filled form 2.zip"
 cd web
 pnpm build
 pnpm test
@@ -52,6 +63,29 @@ pnpm test:e2e
 ```
 
 Regenerate TypeScript OpenAPI contracts after an API change with `cd web && pnpm contracts`.
+
+## Manual Phase 2 acceptance walkthrough
+
+1. Open `/evidence`, select representative case 1, and upload only `Jeev Mail - Limousine_ Elite Chauffer LLC.pdf` and `California's.pdf`. Do not upload the original application workbook or filled workbook as evidence.
+2. Open the scanned-license snapshot. Select the given-name fact and confirm it says explicitly absent rather than an empty or invented name. Confirm the source viewer highlights the original image region.
+3. Review low-confidence and unreadable license regions. Confirm the inspector does not invent a wrapped/obscured identifier and shows the uncertainty beside its provenance.
+4. Open the email snapshot. Confirm applicant/vehicle facts are separate from broker signatures, quoted content, and proposed case directions. Proposed directions must remain unaccepted.
+5. Select representative case 2 and upload only `Mohammad-Khalifeh-08-19-2026 (2).pdf`. Do not upload the original Rivington targets or either FILLED output as evidence.
+6. Click several accepted facts in each snapshot. Confirm each selection navigates to the correct page/rectangle. For a synthetic XLSX source, confirm facts navigate across multiple sheets and exact cells. For text, confirm exact character spans.
+7. Re-ingest an unchanged source. Confirm the original SHA-256 and stored bytes are unchanged and the identical immutable snapshot is reused.
+8. Run the automated commands above. Stop here for Phase 2 approval; there is no target-mapping UI or API in this phase.
+
+## Phase 2 source evaluation (2026-09-22)
+
+The evaluator read only the authorized original source members directly from the two supplied archives. It did not extract or inspect target templates or FILLED outputs.
+
+| Case/source | Parse blocks | Facts | Accepted | Review | Unreadable regions | Result |
+|---|---:|---:|---:|---:|---:|---|
+| Case 1 scanned license (`California's.pdf`) | 37 | 7 | 4 | 3 | 12 | Explicit no-given-name preserved with exact region; local OCR did not recover the license number and did not guess it |
+| Case 1 email PDF | 172 | 36 | 17 | 19 | 0 | Applicant/vehicle facts extracted; email routing and contradictory values remain reviewable |
+| Case 2 Mohammad PDF | 77 | 9 | 9 | 0 | 0 | Source facts extracted with word-derived page rectangles |
+
+Individual observed failures are retained rather than hidden: local OCR did not recover the scanned license number, three scanned-license candidates require review, 12 scan regions were unreadable/low-confidence, and 19 email facts require review due to routing metadata, contradictions, or untrusted direction-like content. Live Reducto output can improve scan coverage while the recorded response fixture keeps CI deterministic.
 
 ## Manual Phase 1 acceptance walkthrough
 

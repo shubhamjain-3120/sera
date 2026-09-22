@@ -12,16 +12,32 @@ from app.config import get_settings
 from app.db import Base, SessionLocal, engine, get_db
 from app.inspectors.pdf import render_pdf_page
 from app.inspectors.xlsx import read_sheet_grid
-from app.models import Artifact, ArtifactKind, ProcessingRun, TemplateDraft, TemplateVersion
+from app.models import (
+    Artifact,
+    ArtifactKind,
+    ArtifactPurpose,
+    EvidenceSnapshot,
+    ProcessingRun,
+    TemplateDraft,
+    TemplateVersion,
+)
 from app.schemas import (
     ArtifactResponse,
     DraftResponse,
     DraftUpdate,
+    EvidenceSnapshotResponse,
+    EvidenceSourceResponse,
     PublishRequest,
     RunResponse,
     VersionResponse,
 )
-from app.services import RevisionConflict, inspect_artifact, publish_draft, update_draft
+from app.services import (
+    RevisionConflict,
+    ingest_evidence,
+    inspect_artifact,
+    publish_draft,
+    update_draft,
+)
 from app.storage import get_storage
 
 Db = Annotated[Session, Depends(get_db)]
@@ -52,6 +68,11 @@ def inspect_artifact_background(run_id: str) -> None:
         inspect_artifact(session, get_storage(), run_id)
 
 
+def ingest_evidence_background(run_id: str) -> None:
+    with SessionLocal() as session:
+        ingest_evidence(session, get_storage(), run_id)
+
+
 def _run_response(run: ProcessingRun) -> RunResponse:
     return RunResponse(
         id=run.id,
@@ -72,7 +93,7 @@ def _run_response(run: ProcessingRun) -> RunResponse:
 
 @app.get("/api/v1/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "phase": "template-inspector"}
+    return {"status": "ok", "phase": "evidence-inspector"}
 
 
 @app.post("/api/v1/artifacts", response_model=ArtifactResponse, status_code=201)
@@ -85,12 +106,18 @@ async def upload_artifact(background: BackgroundTasks, db: Db, file: UploadFile 
     if size > settings.max_upload_bytes:
         raise HTTPException(413, "File exceeds configured upload limit")
     # Storage keys are content-addressed, so identical bytes must reuse the
-    # existing artifact even when the local upload filename differs.
-    existing = db.scalar(select(Artifact).where(Artifact.sha256 == sha256))
+    # existing target artifact even when the local upload filename differs.
+    existing = db.scalar(
+        select(Artifact).where(
+            Artifact.sha256 == sha256,
+            Artifact.purpose == ArtifactPurpose.TARGET,
+        )
+    )
     artifact = existing or Artifact(
         filename=file.filename or f"upload{suffix}",
         media_type=file.content_type or ("application/pdf" if suffix == ".pdf" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
         kind=ArtifactKind.PDF if suffix == ".pdf" else ArtifactKind.XLSX,
+        purpose=ArtifactPurpose.TARGET,
         sha256=sha256,
         size_bytes=size,
         storage_key=key,
@@ -123,7 +150,11 @@ async def upload_artifact(background: BackgroundTasks, db: Db, file: UploadFile 
 
 @app.get("/api/v1/artifacts", response_model=list[ArtifactResponse])
 def list_artifacts(db: Db) -> list[ArtifactResponse]:
-    artifacts = db.scalars(select(Artifact).order_by(Artifact.created_at.desc())).all()
+    artifacts = db.scalars(
+        select(Artifact)
+        .where(Artifact.purpose == ArtifactPurpose.TARGET)
+        .order_by(Artifact.created_at.desc())
+    ).all()
     responses = []
     for artifact in artifacts:
         run = db.scalar(select(ProcessingRun).where(ProcessingRun.artifact_id == artifact.id).order_by(ProcessingRun.created_at.desc()))
@@ -164,6 +195,134 @@ def sheet_grid(artifact_id: str, sheet_name: str, db: Db, min_row: int = 1, max_
             return read_sheet_grid(stream, sheet_name, min_row, max_row, min_col, max_col)
     except KeyError as exc:
         raise HTTPException(404, "Sheet not found") from exc
+
+
+SOURCE_KINDS = {
+    ".pdf": (ArtifactKind.PDF, "application/pdf"),
+    ".xlsx": (ArtifactKind.XLSX, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    ".png": (ArtifactKind.IMAGE, "image/png"),
+    ".jpg": (ArtifactKind.IMAGE, "image/jpeg"),
+    ".jpeg": (ArtifactKind.IMAGE, "image/jpeg"),
+    ".txt": (ArtifactKind.TEXT, "text/plain"),
+}
+
+
+@app.post("/api/v1/evidence/sources", response_model=EvidenceSourceResponse, status_code=201)
+async def upload_evidence_source(
+    background: BackgroundTasks,
+    db: Db,
+    file: UploadFile = File(...),
+    case_key: str = Query(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"),
+) -> EvidenceSourceResponse:
+    if settings.evidence_require_reducto and not settings.reducto_api_key:
+        raise HTTPException(
+            503,
+            "Reducto is required for evidence ingestion. Configure REDUCTO_API_KEY and restart the API.",
+        )
+    normalized_name = (file.filename or "").casefold()
+    if any(marker in normalized_name for marker in ("filled", "reference output", "evaluation-only")):
+        raise HTTPException(422, "Filled reference outputs are evaluation-only and cannot be evidence sources")
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in SOURCE_KINDS:
+        raise HTTPException(415, "Evidence sources must be PDF, XLSX, PNG, JPEG, or UTF-8 text")
+    kind, default_media_type = SOURCE_KINDS[suffix]
+    storage = get_storage()
+    key, sha256, size = storage.put_immutable(file.file, suffix)
+    if size > settings.max_upload_bytes:
+        raise HTTPException(413, "File exceeds configured upload limit")
+    artifact = db.scalar(
+        select(Artifact).where(
+            Artifact.sha256 == sha256,
+            Artifact.purpose == ArtifactPurpose.SOURCE,
+            Artifact.case_key == case_key,
+        )
+    )
+    if artifact is None:
+        artifact = Artifact(
+            filename=file.filename or f"source{suffix}",
+            media_type=file.content_type or default_media_type,
+            kind=kind,
+            purpose=ArtifactPurpose.SOURCE,
+            case_key=case_key,
+            sha256=sha256,
+            size_bytes=size,
+            storage_key=key,
+        )
+        db.add(artifact)
+        db.flush()
+    run = ProcessingRun(
+        artifact_id=artifact.id,
+        stage="evidence-ingestion",
+        provider="reducto",
+        parser_version="pending",
+        config_snapshot={
+            "case_key": case_key,
+            "source_only": True,
+            "allow_native_fallback": False,
+        },
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    background.add_task(ingest_evidence_background, run.id)
+    return EvidenceSourceResponse(
+        id=artifact.id,
+        filename=artifact.filename,
+        media_type=artifact.media_type,
+        kind=artifact.kind.value,
+        purpose=artifact.purpose.value,
+        case_key=artifact.case_key,
+        sha256=artifact.sha256,
+        size_bytes=artifact.size_bytes,
+        created_at=artifact.created_at,
+        run_id=run.id,
+    )
+
+
+@app.get("/api/v1/evidence/sources", response_model=list[EvidenceSourceResponse])
+def list_evidence_sources(db: Db, case_key: str | None = None) -> list[EvidenceSourceResponse]:
+    query = select(Artifact).where(Artifact.purpose == ArtifactPurpose.SOURCE)
+    if case_key is not None:
+        query = query.where(Artifact.case_key == case_key)
+    artifacts = db.scalars(query.order_by(Artifact.created_at.desc())).all()
+    responses = []
+    for artifact in artifacts:
+        run = db.scalar(
+            select(ProcessingRun)
+            .where(ProcessingRun.artifact_id == artifact.id)
+            .order_by(ProcessingRun.created_at.desc())
+        )
+        if not run:
+            continue
+        snapshot = db.scalar(
+            select(EvidenceSnapshot)
+            .where(EvidenceSnapshot.artifact_id == artifact.id)
+            .order_by(EvidenceSnapshot.created_at.desc())
+        )
+        responses.append(
+            EvidenceSourceResponse(
+                id=artifact.id,
+                filename=artifact.filename,
+                media_type=artifact.media_type,
+                kind=artifact.kind.value,
+                purpose=artifact.purpose.value,
+                case_key=artifact.case_key,
+                sha256=artifact.sha256,
+                size_bytes=artifact.size_bytes,
+                created_at=artifact.created_at,
+                run_id=run.id,
+                snapshot_id=snapshot.id if snapshot else None,
+            )
+        )
+    return responses
+
+
+@app.get("/api/v1/evidence/snapshots/{snapshot_id}", response_model=EvidenceSnapshotResponse)
+def get_evidence_snapshot(snapshot_id: str, db: Db) -> EvidenceSnapshot:
+    snapshot = db.get(EvidenceSnapshot, snapshot_id)
+    if not snapshot:
+        raise HTTPException(404, "Evidence snapshot not found")
+    return snapshot
 
 
 @app.get("/api/v1/processing-runs/{run_id}", response_model=RunResponse)

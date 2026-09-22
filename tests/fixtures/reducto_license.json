@@ -1,0 +1,26 @@
+{
+  "provider": "recorded-reducto",
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Given name: No given name",
+      "source": {"kind": "image_rect", "page": 1, "rect": [44, 68, 280, 98], "coordinate_system": "pixels-top-left", "rotation": 0, "rotation_transform": [1, 0, 0, 1, 0, 0], "page_width": 640, "page_height": 400}
+    },
+    {
+      "type": "text",
+      "text": "License number: D123-",
+      "source": {"kind": "image_rect", "page": 1, "rect": [45, 112, 300, 140], "coordinate_system": "pixels-top-left", "rotation": 0, "rotation_transform": [1, 0, 0, 1, 0, 0], "page_width": 640, "page_height": 400}
+    },
+    {
+      "type": "text",
+      "text": "4567",
+      "source": {"kind": "image_rect", "page": 1, "rect": [45, 141, 130, 166], "coordinate_system": "pixels-top-left", "rotation": 0, "rotation_transform": [1, 0, 0, 1, 0, 0], "page_width": 640, "page_height": 400}
+    },
+    {
+      "type": "unreadable",
+      "text": "",
+      "reason": "Glare obscures address line 2",
+      "source": {"kind": "image_rect", "page": 1, "rect": [40, 230, 420, 265], "coordinate_system": "pixels-top-left", "rotation": 0, "rotation_transform": [1, 0, 0, 1, 0, 0], "page_width": 640, "page_height": 400}
+    }
+  ]
+}
