@@ -896,6 +896,96 @@
           }
         }
       }
+    },
+    "/api/v1/fill-plans/{fill_plan_id}/review-decisions": {
+      "post": {
+        "summary": "Post Review Decision",
+        "operationId": "post_review_decision_api_v1_fill_plans__fill_plan_id__review_decisions_post",
+        "parameters": [
+          {
+            "name": "fill_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fill Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewDecisionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewDecisionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List Review Decisions",
+        "operationId": "list_review_decisions_api_v1_fill_plans__fill_plan_id__review_decisions_get",
+        "parameters": [
+          {
+            "name": "fill_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fill Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReviewDecisionResponse"
+                  },
+                  "title": "Response List Review Decisions Api V1 Fill Plans  Fill Plan Id  Review Decisions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2048,6 +2138,170 @@
           "capacity"
         ],
         "title": "RepeatingGroup"
+      },
+      "ReviewDecisionCreate": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Revision"
+          },
+          "target_field_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Target Field Id"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "select_candidate",
+              "edit",
+              "clear",
+              "not_applicable",
+              "intentional_blank",
+              "retain_prefilled",
+              "acknowledge_dependency"
+            ],
+            "title": "Action"
+          },
+          "actor": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Actor"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "candidate_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Id"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "target_field_id",
+          "action",
+          "actor"
+        ],
+        "title": "ReviewDecisionCreate"
+      },
+      "ReviewDecisionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "fill_plan_id": {
+            "type": "string",
+            "title": "Fill Plan Id"
+          },
+          "source_revision_id": {
+            "type": "string",
+            "title": "Source Revision Id"
+          },
+          "source_revision": {
+            "type": "integer",
+            "title": "Source Revision"
+          },
+          "resulting_revision_id": {
+            "type": "string",
+            "title": "Resulting Revision Id"
+          },
+          "resulting_revision": {
+            "type": "integer",
+            "title": "Resulting Revision"
+          },
+          "target_field_id": {
+            "type": "string",
+            "title": "Target Field Id"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "actor": {
+            "type": "string",
+            "title": "Actor"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "candidate_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Id"
+          },
+          "previous_value": {
+            "title": "Previous Value"
+          },
+          "new_value": {
+            "title": "New Value"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Detail"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "fill_plan_id",
+          "source_revision_id",
+          "source_revision",
+          "resulting_revision_id",
+          "resulting_revision",
+          "target_field_id",
+          "action",
+          "actor",
+          "reason",
+          "candidate_id",
+          "detail",
+          "created_at"
+        ],
+        "title": "ReviewDecisionResponse"
       },
       "RunResponse": {
         "properties": {

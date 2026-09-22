@@ -3,7 +3,7 @@
 The canonical phased roadmap and acceptance gates are documented in
 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md). Consult it before starting each phase.
 
-Phase 1 implements target ingestion and the Template Inspector. Phase 2 adds isolated source ingestion and an Evidence Inspector. Phase 3 adds grounded mapping and the Fill Plan Inspector. Phase 4 adds deterministic validation and an independent evidence-aware verifier. Originals remain immutable and content-addressed. Human approval and final output generation intentionally remain for later phases.
+Phase 1 implements target ingestion and the Template Inspector. Phase 2 adds isolated source ingestion and an Evidence Inspector. Phase 3 adds grounded mapping and the Fill Plan Inspector. Phase 4 adds deterministic validation and an independent evidence-aware verifier. Phase 5 adds revision-pinned human review. Originals remain immutable and content-addressed. Final output generation intentionally remains for Phase 6.
 
 ## What is implemented
 
@@ -31,6 +31,11 @@ Inherited page widgets are reconciled through their terminal AcroForm parent. Wi
 - Immutable Verification Reports pinned to an exact Fill Plan revision, payload hash, frozen evidence bundle hash, deterministic/verifier versions, and execution trace.
 - Deterministic structural, type, choice, provenance, derivation-depth, reporting-period, forbidden-write, and repeating-capacity checks that always run before independent verification.
 - A separate evidence-aware verifier that detects wrong-entity selections, unsupported values, conflicting facts, and evidence the mapper missed. It can pass, fail, or request review, but has no path that can alter a selected value.
+- Append-only human review decisions pinned to exact source and resulting Fill Plan revisions, with optimistic concurrency for stale-edit protection.
+- Review-by-exception actions for proposal approval, candidate selection, typed edits, clear, N/A, intentional blank, and prefilled-value retention/replacement/clear disposition.
+- Terminal human authority: prior proposals and provenance remain inspectable, mapping cannot overwrite reviewed targets, and independent semantic verification skips human decisions while deterministic integrity checks continue.
+- Dependency-change invalidation for nonhuman derived values and acknowledgement notices for human-approved dependents. Required-field exceptions require an audited reason and cannot waive forbidden writes or repeating overflow.
+- Immediate PDF/XLSX review overlays and explicit stale-calculation labeling. Phase 5 never regenerates a target document after an individual edit.
 
 The two supplied ZIPs and any extracted customer documents are ignored by Git. Filled reference outputs are not used by the application or test evidence.
 
@@ -71,6 +76,7 @@ uv run pytest -q
 uv run python -m scripts.evaluate_phase2 "/path/to/input and filled form 1.zip" "/path/to/input and filled form 2.zip"
 uv run python -m scripts.evaluate_phase3
 uv run python -m scripts.evaluate_phase4
+uv run python -m scripts.evaluate_phase5
 cd web
 pnpm build
 pnpm test
@@ -78,6 +84,17 @@ pnpm test:e2e
 ```
 
 Regenerate TypeScript OpenAPI contracts after an API change with `cd web && pnpm contracts`.
+
+## Manual Phase 5 acceptance walkthrough
+
+1. Complete the Phase 4 walkthrough and open a verified Fill Plan. Approve a selected proposal and confirm the reviewed value appears immediately in the PDF or workbook overlay while the original remains unchanged.
+2. Select an alternative candidate, enter a typed reviewer edit, and exercise logical boolean/choice controls. Confirm each action creates a new Fill Plan revision and appears in decision history with its source/resulting revisions and actor.
+3. Open the same revision in two browser tabs. Save a decision in one, then save from the other; confirm the late decision receives a revision conflict instead of overwriting the first.
+4. For a required unresolved field, try Clear, N/A, or Intentional blank without a reason and confirm it is rejected. Add a reason and confirm the audited exception succeeds. Confirm signatures, actions, repeating overflow, and other technical integrity failures cannot be waived.
+5. Review a prefilled target and explicitly retain, replace, or clear it. Confirm the disposition appears in the human-decision card.
+6. Change an input to a derived value. Confirm an unreviewed dependent is invalidated. Confirm a human-approved dependent remains unchanged but is blocked by a dependency-change notice until acknowledged.
+7. For workbook edits, confirm the edited value is visible in the overlay and formula results are clearly labeled stale when no supported calculation adapter is available. Confirm no regenerated output is offered.
+8. Run `uv run python -m scripts.evaluate_phase5` and the full automated commands above. Stop here for Phase 5 approval; final PDF/XLSX regeneration and downloads do not exist yet.
 
 ## Manual Phase 4 acceptance walkthrough
 

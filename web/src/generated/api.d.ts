@@ -248,6 +248,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fill-plans/{fill_plan_id}/review-decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Review Decisions */
+        get: operations["list_review_decisions_api_v1_fill_plans__fill_plan_id__review_decisions_get"];
+        put?: never;
+        /** Post Review Decision */
+        post: operations["post_review_decision_api_v1_fill_plans__fill_plan_id__review_decisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -654,6 +672,64 @@ export interface components {
             field_ids?: string[];
             /** Capacity */
             capacity: number;
+        };
+        /** ReviewDecisionCreate */
+        ReviewDecisionCreate: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Target Field Id */
+            target_field_id: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "approve" | "select_candidate" | "edit" | "clear" | "not_applicable" | "intentional_blank" | "retain_prefilled" | "acknowledge_dependency";
+            /** Actor */
+            actor: string;
+            /** Reason */
+            reason?: string | null;
+            /** Candidate Id */
+            candidate_id?: string | null;
+            /** Value */
+            value?: unknown;
+        };
+        /** ReviewDecisionResponse */
+        ReviewDecisionResponse: {
+            /** Id */
+            id: string;
+            /** Fill Plan Id */
+            fill_plan_id: string;
+            /** Source Revision Id */
+            source_revision_id: string;
+            /** Source Revision */
+            source_revision: number;
+            /** Resulting Revision Id */
+            resulting_revision_id: string;
+            /** Resulting Revision */
+            resulting_revision: number;
+            /** Target Field Id */
+            target_field_id: string;
+            /** Action */
+            action: string;
+            /** Actor */
+            actor: string;
+            /** Reason */
+            reason: string | null;
+            /** Candidate Id */
+            candidate_id: string | null;
+            /** Previous Value */
+            previous_value?: unknown;
+            /** New Value */
+            new_value?: unknown;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** RunResponse */
         RunResponse: {
@@ -1486,6 +1562,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VerificationReportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_review_decisions_api_v1_fill_plans__fill_plan_id__review_decisions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fill_plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewDecisionResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_review_decision_api_v1_fill_plans__fill_plan_id__review_decisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fill_plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewDecisionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewDecisionResponse"];
                 };
             };
             /** @description Validation Error */

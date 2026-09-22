@@ -196,3 +196,29 @@ class VerificationReport(Base):
     report: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     fill_plan_revision: Mapped[FillPlanRevision] = relationship()
+
+
+class ReviewDecision(Base):
+    """Append-only human decision pinned to source and resulting revisions."""
+
+    __tablename__ = "review_decisions"
+    __table_args__ = (
+        UniqueConstraint("resulting_revision_id", name="uq_review_resulting_revision"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    fill_plan_id: Mapped[str] = mapped_column(ForeignKey("fill_plans.id"), index=True)
+    source_revision_id: Mapped[str] = mapped_column(
+        ForeignKey("fill_plan_revisions.id"), index=True
+    )
+    resulting_revision_id: Mapped[str] = mapped_column(
+        ForeignKey("fill_plan_revisions.id"), unique=True, index=True
+    )
+    target_field_id: Mapped[str] = mapped_column(String(256), index=True)
+    action: Mapped[str] = mapped_column(String(32), index=True)
+    actor: Mapped[str] = mapped_column(String(256))
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    candidate_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    previous_value: Mapped[Any] = mapped_column(JSON, nullable=True)
+    new_value: Mapped[Any] = mapped_column(JSON, nullable=True)
+    detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

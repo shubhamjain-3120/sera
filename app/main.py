@@ -21,6 +21,7 @@ from app.models import (
     FillPlan,
     FillPlanRevision,
     ProcessingRun,
+    ReviewDecision,
     TemplateDraft,
     TemplateVersion,
     VerificationReport,
@@ -36,6 +37,8 @@ from app.schemas import (
     FillPlanSummary,
     FillPlanUpdate,
     PublishRequest,
+    ReviewDecisionCreate,
+    ReviewDecisionResponse,
     RunResponse,
     VerificationReportResponse,
     VersionResponse,
@@ -46,6 +49,7 @@ from app.services import (
     ingest_evidence,
     inspect_artifact,
     publish_draft,
+    review_fill_plan,
     revise_fill_plan,
     update_draft,
     verify_fill_plan_revision,
@@ -105,7 +109,7 @@ def _run_response(run: ProcessingRun) -> RunResponse:
 
 @app.get("/api/v1/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "phase": "independent-verification"}
+    return {"status": "ok", "phase": "human-review"}
 
 
 @app.post("/api/v1/artifacts", response_model=ArtifactResponse, status_code=201)
@@ -523,3 +527,72 @@ def list_verifications(fill_plan_id: str, db: Db) -> list[VerificationReportResp
         .order_by(FillPlanRevision.revision.desc(), VerificationReport.created_at.desc())
     ).all()
     return [_verification_response(db, report) for report in reports]
+
+
+def _review_response(db: Session, decision: ReviewDecision) -> ReviewDecisionResponse:
+    source = db.get(FillPlanRevision, decision.source_revision_id)
+    resulting = db.get(FillPlanRevision, decision.resulting_revision_id)
+    if source is None or resulting is None:
+        raise HTTPException(500, "Review decision revision is missing")
+    return ReviewDecisionResponse(
+        id=decision.id,
+        fill_plan_id=decision.fill_plan_id,
+        source_revision_id=decision.source_revision_id,
+        source_revision=source.revision,
+        resulting_revision_id=decision.resulting_revision_id,
+        resulting_revision=resulting.revision,
+        target_field_id=decision.target_field_id,
+        action=decision.action,
+        actor=decision.actor,
+        reason=decision.reason,
+        candidate_id=decision.candidate_id,
+        previous_value=decision.previous_value,
+        new_value=decision.new_value,
+        detail=decision.detail,
+        created_at=decision.created_at,
+    )
+
+
+@app.post(
+    "/api/v1/fill-plans/{fill_plan_id}/review-decisions",
+    response_model=ReviewDecisionResponse,
+    status_code=201,
+)
+def post_review_decision(
+    fill_plan_id: str, request: ReviewDecisionCreate, db: Db
+) -> ReviewDecisionResponse:
+    fill_plan = db.get(FillPlan, fill_plan_id)
+    if fill_plan is None:
+        raise HTTPException(404, "Fill Plan not found")
+    try:
+        decision = review_fill_plan(
+            db,
+            fill_plan,
+            expected_revision=request.expected_revision,
+            target_field_id=request.target_field_id,
+            action=request.action,
+            actor=request.actor,
+            reason=request.reason,
+            candidate_id=request.candidate_id,
+            value=request.value,
+        )
+    except RevisionConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _review_response(db, decision)
+
+
+@app.get(
+    "/api/v1/fill-plans/{fill_plan_id}/review-decisions",
+    response_model=list[ReviewDecisionResponse],
+)
+def list_review_decisions(fill_plan_id: str, db: Db) -> list[ReviewDecisionResponse]:
+    if db.get(FillPlan, fill_plan_id) is None:
+        raise HTTPException(404, "Fill Plan not found")
+    decisions = db.scalars(
+        select(ReviewDecision)
+        .where(ReviewDecision.fill_plan_id == fill_plan_id)
+        .order_by(ReviewDecision.created_at.desc())
+    ).all()
+    return [_review_response(db, decision) for decision in decisions]

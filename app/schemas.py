@@ -276,3 +276,40 @@ class VerificationReportResponse(BaseModel):
     report_sha256: str
     report: dict[str, Any]
     created_at: datetime
+
+
+class ReviewDecisionCreate(BaseModel):
+    expected_revision: int = Field(ge=1)
+    target_field_id: str = Field(min_length=1, max_length=256)
+    action: Literal[
+        "approve",
+        "select_candidate",
+        "edit",
+        "clear",
+        "not_applicable",
+        "intentional_blank",
+        "retain_prefilled",
+        "acknowledge_dependency",
+    ]
+    actor: str = Field(min_length=1, max_length=256)
+    reason: str | None = Field(default=None, max_length=4000)
+    candidate_id: str | None = None
+    value: Any = None
+
+
+class ReviewDecisionResponse(BaseModel):
+    id: str
+    fill_plan_id: str
+    source_revision_id: str
+    source_revision: int
+    resulting_revision_id: str
+    resulting_revision: int
+    target_field_id: str
+    action: str
+    actor: str
+    reason: str | None
+    candidate_id: str | None
+    previous_value: Any = None
+    new_value: Any = None
+    detail: dict[str, Any]
+    created_at: datetime

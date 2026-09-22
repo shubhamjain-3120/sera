@@ -62,6 +62,18 @@ def deterministic_validate(payload: dict[str, Any]) -> dict[str, Any]:
             continue
         seen_targets.add(target_id)
         candidate = _selected(target)
+        review = target.get("review") or {}
+        dependency_notice = review.get("dependency_notice") or {}
+        if dependency_notice and not dependency_notice.get("acknowledged"):
+            findings.append(
+                _finding(
+                    "dependency_acknowledgement_required",
+                    "blocker",
+                    target_id,
+                    "A human-approved dependent value must acknowledge its changed input.",
+                    source="deterministic",
+                )
+            )
         if target.get("selected_candidate_id") and candidate is None:
             findings.append(
                 _finding(
@@ -97,11 +109,12 @@ def deterministic_validate(payload: dict[str, Any]) -> dict[str, Any]:
             )
         value = candidate.get("value")
         field_type = field.get("field_type", "unknown")
-        if field_type == "number" and not isinstance(value, (int, float)):
+        required_exception = bool(review.get("required_exception"))
+        if field_type == "number" and not required_exception and not isinstance(value, (int, float)):
             findings.append(_finding("type_mismatch", "blocker", target_id, "Selected value is not numeric.", source="deterministic"))
-        if field_type == "boolean" and not isinstance(value, bool):
+        if field_type == "boolean" and not required_exception and not isinstance(value, bool):
             findings.append(_finding("type_mismatch", "blocker", target_id, "Selected value is not boolean.", source="deterministic"))
-        if field_type == "choice" and field.get("options") and value not in field["options"]:
+        if field_type == "choice" and not required_exception and field.get("options") and value not in field["options"]:
             findings.append(_finding("invalid_choice", "blocker", target_id, "Selected value is not an approved choice.", source="deterministic"))
         if candidate.get("origin") == "evidence" and not candidate.get("provenance"):
             findings.append(_finding("missing_provenance", "blocker", target_id, "Evidence-backed value has no exact source location.", source="deterministic"))
@@ -149,6 +162,11 @@ class EvidenceAwareVerifier:
             field = target.get("field", {})
             target_id = field.get("id")
             selected = _selected(target)
+            if target.get("review", {}).get("origin") == "human":
+                # Human decisions are terminal semantic authority. Deterministic
+                # validation still runs, but the independent verifier must not
+                # reinterpret or overturn the reviewer.
+                continue
             target_role = next((role for role in ("applicant", "business", "driver", "vehicle", "broker", "owner") if role in _tokens(f"{field.get('semantic_type')} {field.get('label')}")), None)
             if selected:
                 fact = fact_by_id.get(selected.get("fact_id"))

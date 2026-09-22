@@ -187,8 +187,8 @@ export interface MappingCandidate {
   unit?: string | null;
   date_context?: string | null;
   period_context?: string | null;
-  origin: "evidence" | "derivation";
-  resolution: "direct" | "normalized" | "derived";
+  origin: "evidence" | "derivation" | "human";
+  resolution: "direct" | "normalized" | "derived" | "human";
   evidence_confidence: number;
   match_score: number;
   provenance: EvidenceLocation[];
@@ -204,7 +204,19 @@ export interface FillPlanTarget {
   selected_candidate_id?: string | null;
   candidates: MappingCandidate[];
   issues: MappingIssue[];
-  state: "proposed" | "unresolved" | "not_applicable";
+  state: "proposed" | "unresolved" | "not_applicable" | "reviewed" | "dependency_changed";
+  review?: {
+    status: "approved" | "exception" | "needs_acknowledgement";
+    origin: "human";
+    action: string;
+    actor: string;
+    reason?: string | null;
+    decision_id: string;
+    required_exception: boolean;
+    prefilled_disposition?: "retain" | "replace" | "clear" | null;
+    terminal_authority: true;
+    dependency_notice?: { changed_target_id: string; acknowledged: boolean };
+  };
 }
 
 export interface FillPlanSummary {
@@ -234,9 +246,28 @@ export interface FillPlan extends FillPlanSummary {
     repeating_groups: Array<{ id: string; label: string; capacity: number; entity_ids: string[]; assigned_entity_ids: string[]; overflow_entity_ids: string[] }>;
     derivations: Array<Record<string, unknown>>;
     issues: MappingIssue[];
-    summary: { target_count: number; proposed_count: number; unresolved_count: number; issue_count: number; blocker_count: number };
+    summary: { target_count: number; proposed_count: number; unresolved_count: number; issue_count: number; blocker_count: number; reviewed_count?: number; review_pending_count?: number };
     evidence_bundle: { id: string; case_key: string; snapshot_ids: string[]; sha256: string };
+    preview_calculation?: { status: "stale" | "current"; changed_target_id: string; message: string };
   };
+}
+
+export type ReviewAction = "approve" | "select_candidate" | "edit" | "clear" | "not_applicable" | "intentional_blank" | "retain_prefilled" | "acknowledge_dependency";
+
+export interface ReviewDecision {
+  id: string;
+  fill_plan_id: string;
+  source_revision: number;
+  resulting_revision: number;
+  target_field_id: string;
+  action: ReviewAction;
+  actor: string;
+  reason?: string | null;
+  candidate_id?: string | null;
+  previous_value: unknown;
+  new_value: unknown;
+  detail: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface VerificationFinding {

@@ -1,4 +1,4 @@
-import type { Artifact, Draft, EvidenceSnapshot, EvidenceSource, FillPlan, FillPlanSummary, Run, TemplateSchema, TemplateVersion, VerificationReport } from "./types";
+import type { Artifact, Draft, EvidenceSnapshot, EvidenceSource, FillPlan, FillPlanSummary, ReviewAction, ReviewDecision, Run, TemplateSchema, TemplateVersion, VerificationReport } from "./types";
 
 export const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -51,6 +51,13 @@ export const api = {
     }),
   listVerifications: (fillPlanId: string) => request<VerificationReport[]>(`/api/v1/fill-plans/${fillPlanId}/verifications`),
   verifyFillPlan: (fillPlanId: string, revision: number) => request<VerificationReport>(`/api/v1/fill-plans/${fillPlanId}/verifications?revision=${revision}`, { method: "POST" }),
+  listReviewDecisions: (fillPlanId: string) => request<ReviewDecision[]>(`/api/v1/fill-plans/${fillPlanId}/review-decisions`),
+  reviewFillPlan: (fillPlanId: string, input: { expected_revision: number; target_field_id: string; action: ReviewAction; actor: string; reason?: string; candidate_id?: string; value?: unknown }) =>
+    request<ReviewDecision>(`/api/v1/fill-plans/${fillPlanId}/review-decisions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
   grid: (artifactId: string, sheet: string, row = 1, column = 1) => {
     const minRow = Math.max(1, row - 8);
     const minCol = Math.max(1, column - 3);

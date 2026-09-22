@@ -20,12 +20,15 @@ from app.models import (
     FillPlan,
     FillPlanRevision,
     ProcessingRun,
+    ReviewDecision,
     RunStatus,
     TemplateDraft,
     TemplateVersion,
     VerificationReport,
+    new_id,
 )
 from app.parsers.reducto import ReductoParserAdapter
+from app.review import apply_review_decision
 from app.schemas import TemplateSchema
 from app.storage import ObjectStorage
 from app.verification import (
@@ -342,6 +345,17 @@ def revise_fill_plan(
     )
     if current is None:
         raise ValueError("Current Fill Plan revision is missing")
+    human_targets = {
+        target.get("field", {}).get("id")
+        for target in current.payload.get("targets", [])
+        if target.get("review", {}).get("origin") == "human"
+    }
+    attempted = human_targets.intersection(selected_candidates)
+    if attempted:
+        raise ValueError(
+            "Human-reviewed targets have terminal authority and cannot be changed by mapping: "
+            + ", ".join(sorted(attempted))
+        )
     payload = apply_revision(current.payload, selected_candidates, derivations)
     next_number = fill_plan.current_revision + 1
     revision = _fill_plan_revision(fill_plan.id, next_number, payload)
@@ -350,6 +364,67 @@ def revise_fill_plan(
     session.commit()
     session.refresh(revision)
     return revision
+
+
+def review_fill_plan(
+    session: Session,
+    fill_plan: FillPlan,
+    *,
+    expected_revision: int,
+    target_field_id: str,
+    action: str,
+    actor: str,
+    reason: str | None,
+    candidate_id: str | None,
+    value: object,
+) -> ReviewDecision:
+    if fill_plan.current_revision != expected_revision:
+        raise RevisionConflict(
+            f"Expected revision {expected_revision}, current revision is {fill_plan.current_revision}"
+        )
+    current = session.scalar(
+        select(FillPlanRevision).where(
+            FillPlanRevision.fill_plan_id == fill_plan.id,
+            FillPlanRevision.revision == expected_revision,
+        )
+    )
+    if current is None:
+        raise ValueError("Current Fill Plan revision is missing")
+    decision = ReviewDecision(
+        id=new_id(),
+        fill_plan_id=fill_plan.id,
+        source_revision_id=current.id,
+        resulting_revision_id="",
+        target_field_id=target_field_id,
+        action=action,
+        actor=actor,
+        reason=reason,
+    )
+    payload, audit = apply_review_decision(
+        current.payload,
+        decision_id=decision.id,
+        target_field_id=target_field_id,
+        action=action,
+        actor=actor,
+        reason=reason,
+        candidate_id=candidate_id,
+        value=value,
+    )
+    next_number = expected_revision + 1
+    revision = _fill_plan_revision(fill_plan.id, next_number, payload)
+    revision.mapper_version = f"{current.mapper_version}+human-review-v1"
+    session.add(revision)
+    session.flush()
+    decision.resulting_revision_id = revision.id
+    decision.candidate_id = audit["candidate_id"]
+    decision.previous_value = audit["previous_value"]
+    decision.new_value = audit["new_value"]
+    decision.detail = audit["detail"]
+    session.add(decision)
+    fill_plan.current_revision = next_number
+    session.commit()
+    session.refresh(decision)
+    return decision
 
 
 def _fill_plan_revision(fill_plan_id: str, revision: int, payload: dict) -> FillPlanRevision:
