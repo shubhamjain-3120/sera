@@ -297,6 +297,23 @@ export interface paths {
         patch: operations["patch_form_field_api_v1_form_fills__fill_id__fields__field_id__patch"];
         trace?: never;
     };
+    "/api/v1/form-fills/{fill_id}/fields/{field_id}/geometry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Form Field Geometry */
+        patch: operations["patch_form_field_geometry_api_v1_form_fills__fill_id__fields__field_id__geometry_patch"];
+        trace?: never;
+    };
     "/api/v1/form-fills/{fill_id}/approve-and-export": {
         parameters: {
             query?: never;
@@ -620,12 +637,23 @@ export interface components {
             /** Snapshot Id */
             snapshot_id?: string | null;
         };
+        /** FormFieldGeometryUpdate */
+        FormFieldGeometryUpdate: {
+            /** Geometry */
+            geometry: {
+                [key: string]: unknown;
+            };
+        };
         /** FormFieldUpdate */
         FormFieldUpdate: {
             /** Write Value */
             write_value?: unknown;
             /** Evidence Fact Ids */
             evidence_fact_ids?: string[] | null;
+            /** Geometry */
+            geometry?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** FormFillCreate */
         FormFillCreate: {
@@ -654,6 +682,10 @@ export interface components {
             answers: {
                 [key: string]: unknown;
             }[];
+            /** Mapping Metadata */
+            mapping_metadata?: {
+                [key: string]: unknown;
+            };
             /** State */
             state: string;
             /** Model Execution Id */
@@ -1615,6 +1647,42 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["FormFieldUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormFillResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_form_field_geometry_api_v1_form_fills__fill_id__fields__field_id__geometry_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fill_id: string;
+                field_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FormFieldGeometryUpdate"];
             };
         };
         responses: {

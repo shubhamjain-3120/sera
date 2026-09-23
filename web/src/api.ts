@@ -61,11 +61,15 @@ export const api = {
       body: JSON.stringify({ details }),
     }),
   listCases: () => request<CaseSummary[]>("/api/v1/cases"),
-  updateFormFillField: (id: string, fieldId: string, input: { write_value: unknown; evidence_fact_ids?: string[] }) =>
+  updateFormFillField: (id: string, fieldId: string, input: { write_value: unknown; evidence_fact_ids?: string[]; geometry?: { page: number; rect: [number, number, number, number]; coordinate_system: "normalized-top-left" } }) =>
     request<FormFill>(`/api/v1/form-fills/${id}/fields/${encodeURIComponent(fieldId)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
+    }),
+  updateFormFillGeometry: (id: string, fieldId: string, geometry: { page: number; rect: [number, number, number, number]; coordinate_system: "normalized-top-left" }) =>
+    request<FormFill>(`/api/v1/form-fills/${id}/fields/${encodeURIComponent(fieldId)}/geometry`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ geometry }),
     }),
   approveAndExport: (id: string) => request<FormFill>(`/api/v1/form-fills/${id}/approve-and-export`, { method: "POST" }),
   formFillOutput: (id: string) => `${API}/api/v1/form-fills/${id}/output`,

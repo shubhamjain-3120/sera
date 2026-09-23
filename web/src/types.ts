@@ -181,8 +181,35 @@ export interface CaseSummary {
   created_at: string;
 }
 
+export type FormFillAnswerKind = "supported" | "inferred" | "tentative" | "human" | "unknown";
+export type FactDisposition = "mapped" | "partial" | "no_destination" | "needs_review" | string;
+export interface SupplementalFact { label: string; key: string; value: unknown; raw_value?: string; source_block_ids?: string[]; explanation?: string | null; classification?: FormFillAnswerKind | string }
 export interface FormFillSnippet { text: string; artifact_id?: string; snapshot_id?: string; page?: number; rect?: number[]; sheet?: string; cell_range?: string }
-export interface FormFillField { field: TemplateField; write_value: unknown; origin?: "model" | "human" | "prefilled"; evidence_fact_ids?: string[]; source_block_ids?: string[]; assumption?: string | null; snippets?: FormFillSnippet[] }
-export interface FormFillEvidence { fact: EvidenceFact; snapshot_id?: string; artifact_id?: string; used: boolean; field_ids: string[] }
+export interface FormFillField {
+  field: TemplateField;
+  write_value: unknown;
+  origin?: "model" | "human" | "prefilled" | string;
+  answer_kind?: FormFillAnswerKind | string;
+  classification?: FormFillAnswerKind | string;
+  explanation?: string | null;
+  assumption?: string | null;
+  evidence_fact_ids?: string[];
+  source_block_ids?: string[];
+  snippets?: FormFillSnippet[];
+}
+export interface FormFillEvidence {
+  fact: EvidenceFact;
+  supplemental_fact?: SupplementalFact;
+  snapshot_id?: string;
+  artifact_id?: string;
+  used: boolean;
+  field_ids: string[];
+  disposition?: FactDisposition;
+  gap?: string | null;
+  reason?: string | null;
+  explanation?: string | null;
+  substantive?: boolean;
+}
 export interface FormFillSummary { id: string; case_key: string; template_version_id: string; template_name: string; target_artifact_id: string; target_kind: "pdf" | "xlsx"; status: string; output_available?: boolean; output_error?: string | null; created_at?: string; updated_at?: string }
-export interface FormFill extends FormFillSummary { agency_key?: string; fields: FormFillField[]; evidence: FormFillEvidence[]; output_path?: string | null }
+export interface FormFill extends FormFillSummary { agency_key?: string; fields: FormFillField[]; evidence: FormFillEvidence[]; mapping_metadata?: { fact_dispositions?: Array<{ fact_id: string; disposition: FactDisposition; field_ids?: string[]; reason?: string | null }>; supplemental_facts?: SupplementalFact[]; [key: string]: unknown }; output_path?: string | null }
+export interface FormFieldGeometry { page: number; rect: [number, number, number, number]; coordinate_system: "normalized-top-left" }

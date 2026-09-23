@@ -13,6 +13,8 @@ from xml.etree import ElementTree as ET
 
 from openpyxl.utils.datetime import to_excel
 from pypdf import PdfReader, PdfWriter
+from pypdf.generic import ArrayObject, NameObject, NumberObject, TextStringObject
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
 from app.xlsx_preserve import MAIN_NS, _sheet_part
@@ -59,15 +61,84 @@ def _pdf_value(field: dict[str, Any], value: Any) -> str:
     return str(value)
 
 
+def _enable_native_autosize(writer: PdfWriter, names: set[str]) -> None:
+    """Set only the font size in matching widget default appearances to zero."""
+    for page in writer.pages:
+        for annotation_ref in page.get("/Annots", []):
+            annotation = annotation_ref.get_object()
+            parent = annotation.get("/Parent")
+            parent = parent.get_object() if parent else annotation
+            try:
+                qualified = writer._get_qualified_field_name(parent=parent)
+            except Exception:
+                qualified = str(parent.get("/T", ""))
+            if qualified not in names:
+                continue
+            appearance = parent.get("/DA") or annotation.get("/DA")
+            if appearance is None:
+                continue
+            updated = re.sub(r"(?<![\w.])-?(?:\d+(?:\.\d*)?|\.\d+)\s+Tf\b", "0 Tf", str(appearance))
+            if updated != str(appearance):
+                parent[NameObject("/DA")] = TextStringObject(updated)
+
+
+def _pdf_rect(location: dict[str, Any], page: Any) -> list[float]:
+    rect = location.get("rect") or []
+    if len(rect) != 4:
+        raise ValueError("Field rectangle is invalid")
+    x1, y1, x2, y2 = (float(item) for item in rect)
+    if location.get("coordinate_system") == "normalized-top-left":
+        width, height = float(page.mediabox.width), float(page.mediabox.height)
+        return [x1 * width, height - y2 * height, x2 * width, height - y1 * height]
+    return [x1, y1, x2, y2]
+
+
+def _resize_native_widget(writer: PdfWriter, field: dict[str, Any]) -> bool:
+    name = field.get("native_full_name") or field.get("native_name")
+    location = field.get("location") or {}
+    if not name or location.get("kind") != "pdf_rect":
+        return False
+    target_page = int(location.get("page") or 1) - 1
+    if target_page < 0 or target_page >= len(writer.pages):
+        return False
+    page = writer.pages[target_page]
+    for annotation_ref in page.get("/Annots", []):
+        annotation = annotation_ref.get_object()
+        parent = annotation.get("/Parent")
+        parent_obj = parent.get_object() if parent else annotation
+        try:
+            qualified = writer._get_qualified_field_name(parent=parent_obj)
+        except Exception:
+            qualified = str(parent_obj.get("/T", ""))
+        if qualified != str(name):
+            continue
+        annotation[NameObject("/Rect")] = ArrayObject(NumberObject(value) for value in _pdf_rect(location, page))
+        return True
+    return False
+
+
 def _write_pdf(original: bytes, fields: list[dict[str, Any]], values: dict[str, Any]) -> bytes:
     writer = PdfWriter()
     writer.clone_document_from_reader(PdfReader(io.BytesIO(original)))
+    autosize_names = {
+        str(field.get("native_full_name") or field.get("native_name"))
+        for field in fields
+        if field.get("field_type") in {"text", "number", "date"}
+        and (field.get("native_full_name") or field.get("native_name"))
+    }
+    _enable_native_autosize(writer, autosize_names)
     overlays: dict[int, list[tuple[dict[str, Any], Any]]] = defaultdict(list)
     changed = False
     for field in fields:
         if field.get("writable") is False or field.get("field_type") in {"action", "signature"}:
             continue
         field_id = str(field["id"])
+        has_geometry = field.get("location", {}).get("coordinate_system") == "normalized-top-left"
+        if has_geometry:
+            if field.get("native_full_name") or field.get("native_name"):
+                if not _resize_native_widget(writer, field):
+                    raise FormWriteError(field_id, "Could not locate native widget for reviewed geometry")
+            changed = True
         if field_id not in values:
             continue
         value = values[field_id]
@@ -91,8 +162,15 @@ def _write_pdf(original: bytes, fields: list[dict[str, Any]], values: dict[str, 
                 overlays[page_index].append((field, value))
             continue
         try:
+            encoded = _pdf_value(field, value)
+            # pypdf accepts (value, font resource, 0) for native text widgets;
+            # zero requests its width/height autosizing logic. Keep choices and
+            # checkboxes as their native export values because tuples are only
+            # valid for text appearance streams.
+            if field.get("field_type") in {"text", "number", "date"} and not _is_blank(value):
+                encoded = (encoded, "/Helv", 0)
             writer.update_page_form_field_values(
-                None, {str(name): _pdf_value(field, value)}, auto_regenerate=False
+                None, {str(name): encoded}, auto_regenerate=True
             )
         except Exception as exc:
             raise FormWriteError(field_id, f"Could not write PDF field: {exc}") from exc
@@ -107,9 +185,15 @@ def _write_pdf(original: bytes, fields: list[dict[str, Any]], values: dict[str, 
         for field, value in entries:
             field_id = str(field["id"])
             try:
-                x1, y1, x2, y2 = (float(item) for item in field["location"]["rect"])
+                x1, y1, x2, y2 = _pdf_rect(field["location"], page)
                 text = "X" if field.get("field_type") == "boolean" and value is True else str(value)
-                size = min(11.0, max(6.0, (y2 - y1) * 0.7))
+                width = max(0.0, x2 - x1 - 4.0)
+                height = max(0.0, y2 - y1 - 2.0)
+                size = min(11.0, max(6.0, height * 0.72))
+                while size > 6.0 and stringWidth(text, "Helvetica", size) > width:
+                    size -= 0.25
+                if stringWidth(text, "Helvetica", size) > width or size > height:
+                    raise ValueError("value does not fit in field rectangle")
                 drawing.setFont("Helvetica", size)
                 drawing.drawString(x1 + 2, y1 + max(1.0, (y2 - y1 - size) / 2), text)
             except Exception as exc:

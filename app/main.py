@@ -1,3 +1,4 @@
+import hashlib
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from io import BytesIO
@@ -36,6 +37,7 @@ from app.schemas import (
     DraftUpdate,
     EvidenceSnapshotResponse,
     EvidenceSourceResponse,
+    FormFieldGeometryUpdate,
     FormFieldUpdate,
     FormFillCreate,
     FormFillResponse,
@@ -469,7 +471,16 @@ def _snippet_for_fact(snapshot: dict[str, Any], fact: dict[str, Any], snapshot_i
 def _form_response(db: Session, fill: FormFill) -> FormFillResponse:
     version = db.get(TemplateVersion, fill.template_version_id)
     answers = fill.answers or []
-    used = {fid for answer in answers for fid in answer.get("evidence_fact_ids", [])}
+    def populated(answer: dict[str, Any]) -> bool:
+        value = answer.get("write_value")
+        return value is not None and (not isinstance(value, str) or bool(value.strip()))
+    # A cleared answer no longer consumes its evidence fact. This keeps the
+    # review usage indicator aligned with the current editable form state.
+    used = {
+        fid for answer in answers
+        if populated(answer)
+        for fid in answer.get("evidence_fact_ids", [])
+    }
     snapshots = [db.get(EvidenceSnapshot, sid) for sid in fill.evidence_snapshot_ids or []]
     facts_by_id: dict[str, tuple[dict[str, Any], EvidenceSnapshot]] = {}
     blocks_by_id: dict[str, dict[str, Any]] = {}
@@ -494,7 +505,19 @@ def _form_response(db: Session, fill: FormFill) -> FormFillResponse:
     registry_facts = {fact["id"]: fact for fact in agency_facts({"key": agency_row.key, "name": agency_row.name, "details": agency_row.details})} if agency_row else {}
     fields = []
     if version:
+        saved_geometry = (fill.mapping_metadata or {}).get("field_geometry") or {}
         for field in version.schema.get("fields", []) or []:
+            field = dict(field)
+            saved = saved_geometry.get(str(field.get("id")))
+            if saved and field.get("location", {}).get("kind") == "pdf_rect":
+                x, y, width, height = (float(value) for value in saved.get("rect", []))
+                location = dict(field.get("location") or {})
+                location.update({"page": int(saved.get("page") or location.get("page") or 1), "rect": [x, y, x + width, y + height], "coordinate_system": "normalized-top-left"})
+                field["location"] = location
+                widgets = list(field.get("widgets") or [])
+                if widgets:
+                    widgets[0] = location
+                    field["widgets"] = widgets
             answer = next((a for a in answers if a.get("field_id") == field.get("id")), None)
             snippets: list[dict[str, Any]] = []
             if answer:
@@ -516,14 +539,33 @@ def _form_response(db: Session, fill: FormFill) -> FormFillResponse:
                            "write_value": (answer or {}).get("write_value", field.get("current_value")),
                            "origin": (answer or {}).get("origin", "prefilled"),
                            "snippets": snippets})
+    field_order = [str(item.get("id")) for item in (version.schema.get("fields", []) if version else [])]
+    order = {field_id: index for index, field_id in enumerate(field_order)}
+    dispositions = {item.get("fact_id"): item for item in (fill.mapping_metadata or {}).get("fact_dispositions", [])}
     evidence = []
     for snapshot_row in snapshots:
         if not snapshot_row:
             continue
         for fact in snapshot_row.snapshot.get("facts", []) or []:
-            evidence.append({"fact": fact, "snapshot_id": snapshot_row.id, "artifact_id": snapshot_row.artifact_id, "used": fact.get("id") in used, "field_ids": [a.get("field_id") for a in answers if fact.get("id") in a.get("evidence_fact_ids", [])]})
+            linked = sorted((a.get("field_id") for a in answers if fact.get("id") in a.get("evidence_fact_ids", []) and populated(a)), key=lambda value: order.get(str(value), len(order)))
+            disposition = dispositions.get(fact.get("id"), {"disposition": "needs_review", "reason": "No mapping disposition was returned"})
+            evidence.append({"fact": fact, "snapshot_id": snapshot_row.id, "artifact_id": snapshot_row.artifact_id, "used": fact.get("id") in used, "field_ids": linked, "disposition": disposition.get("disposition"), "reason": disposition.get("reason")})
     artifact = db.get(Artifact, version.draft.artifact_id) if version and version.draft else None
-    return FormFillResponse(id=fill.id, case_key=fill.case_key, template_version_id=fill.template_version_id, template_name=version.name if version else "", target_artifact_id=artifact.id if artifact else "", target_kind=artifact.kind.value if artifact else "", status=fill.state, output_available=fill.state == "exported" and bool(fill.output_storage_key), output_error=fill.error, fields=fields, evidence=evidence, answers=answers, evidence_snapshot_ids=fill.evidence_snapshot_ids or [], agency_key=fill.agency_key, state=fill.state, model_execution_id=fill.model_execution_id, error=fill.error, output_filename=fill.output_filename, output_media_type=fill.output_media_type, output_sha256=fill.output_sha256, created_at=fill.created_at, updated_at=fill.updated_at, approved_at=fill.approved_at)
+    for item in (fill.mapping_metadata or {}).get("supplemental_facts", []):
+        fact_id = item.get("id") or "supplemental_" + hashlib.sha256(
+            f"{item.get('key')}|{item.get('value')}|{item.get('source_block_ids')}".encode()
+        ).hexdigest()[:20]
+        fact = {"id": fact_id, "key": item.get("key", ""), "label": item.get("label", ""),
+                "value": item.get("value"), "raw_value": item.get("raw_value", ""),
+                "entity_id": "applicant", "entity_role": "applicant", "confidence": 1.0,
+                "uncertainty": [], "source_block_ids": item.get("source_block_ids", []),
+                "semantics": ["supplemental_fact"]}
+        disposition = dispositions.get(fact_id, {})
+        linked = sorted((a.get("field_id") for a in answers if fact_id in a.get("evidence_fact_ids", []) and populated(a)), key=lambda value: order.get(str(value), len(order)))
+        evidence.append({"fact": fact, "supplemental_fact": item, "used": bool(linked), "field_ids": linked,
+                         "disposition": disposition.get("disposition", "needs_review"),
+                         "reason": disposition.get("reason"), "explanation": item.get("explanation")})
+    return FormFillResponse(id=fill.id, case_key=fill.case_key, template_version_id=fill.template_version_id, template_name=version.name if version else "", target_artifact_id=artifact.id if artifact else "", target_kind=artifact.kind.value if artifact else "", status=fill.state, output_available=fill.state == "exported" and bool(fill.output_storage_key), output_error=fill.error, fields=fields, evidence=evidence, answers=answers, mapping_metadata=fill.mapping_metadata or {}, evidence_snapshot_ids=fill.evidence_snapshot_ids or [], agency_key=fill.agency_key, state=fill.state, model_execution_id=fill.model_execution_id, error=fill.error, output_filename=fill.output_filename, output_media_type=fill.output_media_type, output_sha256=fill.output_sha256, created_at=fill.created_at, updated_at=fill.updated_at, approved_at=fill.approved_at)
 
 
 @app.post("/api/v1/form-fills", response_model=FormFillRunResponse, status_code=202)
@@ -558,7 +600,18 @@ def patch_form_field(fill_id: str, field_id: str, request: FormFieldUpdate, db: 
     if not fill:
         raise HTTPException(404, "Form fill not found")
     try:
-        return _form_response(db, update_form_field(db, fill, field_id, request.write_value, request.evidence_fact_ids))
+        return _form_response(db, update_form_field(db, fill, field_id, request.write_value, request.evidence_fact_ids, request.geometry))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.patch("/api/v1/form-fills/{fill_id}/fields/{field_id}/geometry", response_model=FormFillResponse)
+def patch_form_field_geometry(fill_id: str, field_id: str, request: FormFieldGeometryUpdate, db: Db) -> FormFillResponse:
+    fill = db.get(FormFill, fill_id)
+    if not fill:
+        raise HTTPException(404, "Form fill not found")
+    try:
+        return _form_response(db, update_form_field(db, fill, field_id, None, None, request.geometry))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -575,9 +628,20 @@ def approve_and_export(fill_id: str, db: Db) -> FormFillResponse:
         raise HTTPException(404, "Form fill not found")
     values = {field.get("id"): field.get("current_value") for field in version.schema.get("fields", []) or []}
     values.update({answer.get("field_id"): answer.get("write_value") for answer in fill.answers or []})
+    schema_for_output = dict(version.schema)
+    schema_for_output["fields"] = [dict(field) for field in version.schema.get("fields", []) or []]
+    geometry = (fill.mapping_metadata or {}).get("field_geometry") or {}
+    for field in schema_for_output["fields"]:
+        item = geometry.get(str(field.get("id")))
+        if not item:
+            continue
+        x, y, width, height = (float(value) for value in item["rect"])
+        location = dict(field.get("location") or {})
+        location.update({"page": int(item.get("page") or location.get("page") or 1), "rect": [x, y, x + width, y + height], "coordinate_system": "normalized-top-left"})
+        field["location"] = location
     try:
         with get_storage().open(artifact.storage_key) as source:
-            output = write_form(source.read(), version.schema, values, artifact.kind.value)
+            output = write_form(source.read(), schema_for_output, values, artifact.kind.value)
     except FormWriteError as exc:
         fill.state = "export_failed"
         fill.error = f"{exc.field_id}: {exc.message}"

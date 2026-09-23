@@ -12,7 +12,17 @@ from app.output_writer import FormWriteError, write_form
 def _flat_pdf() -> bytes:
     stream = BytesIO()
     document = canvas.Canvas(stream, pagesize=(300, 300))
+    document.drawString(10, 10, "")
     document.drawString(20, 250, "Applicant:")
+    document.save()
+    return stream.getvalue()
+
+
+def _native_pdf() -> bytes:
+    stream = BytesIO()
+    document = canvas.Canvas(stream, pagesize=(300, 300))
+    document.drawString(10, 10, "")
+    document.acroForm.textfield(name="applicant", x=20, y=250, width=50, height=14, fontSize=12)
     document.save()
     return stream.getvalue()
 
@@ -26,6 +36,36 @@ def test_manual_pdf_field_is_visible_in_output():
     }
     output = write_form(_flat_pdf(), {"fields": [field]}, {"applicant": "Client Name"}, "pdf")
     assert "Client Name" in PdfReader(BytesIO(output)).pages[0].extract_text()
+
+
+def test_native_pdf_text_field_autosizes_long_value():
+    field = {"id": "applicant", "native_name": "applicant", "field_type": "text", "current_value": None}
+    output = write_form(_native_pdf(), {"fields": [field]}, {"applicant": "A very long applicant name"}, "pdf")
+    page = PdfReader(BytesIO(output)).pages[0]
+    content = page["/Annots"][0].get_object()["/AP"]["/N"].get_object().get_data().decode("latin1")
+    sizes = [float(match) for match in __import__("re").findall(r"([0-9.]+) Tf", content)]
+    assert sizes and min(sizes) < 12
+
+
+def test_normalized_geometry_resizes_flat_pdf_overlay():
+    field = {
+        "id": "applicant", "field_type": "text",
+        "location": {"kind": "pdf_rect", "page": 1, "rect": [0.1, 0.2, 0.4, 0.3], "coordinate_system": "normalized-top-left"},
+        "current_value": None,
+    }
+    output = write_form(_flat_pdf(), {"fields": [field]}, {"applicant": "Client Name"}, "pdf")
+    assert "Client Name" in PdfReader(BytesIO(output)).pages[0].extract_text()
+
+
+def test_normalized_geometry_resizes_only_matching_native_widget():
+    field = {
+        "id": "applicant", "native_name": "applicant", "field_type": "text",
+        "location": {"kind": "pdf_rect", "page": 1, "rect": [0.2, 0.25, 0.7, 0.35], "coordinate_system": "normalized-top-left"},
+        "current_value": None,
+    }
+    output = write_form(_native_pdf(), {"fields": [field]}, {"applicant": "Alice"}, "pdf")
+    rect = [float(value) for value in PdfReader(BytesIO(output)).pages[0]["/Annots"][0].get_object()["/Rect"]]
+    assert rect == pytest.approx([60, 195, 210, 225])
 
 
 def test_pdf_action_is_not_written():

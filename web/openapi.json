@@ -911,6 +911,64 @@
         }
       }
     },
+    "/api/v1/form-fills/{fill_id}/fields/{field_id}/geometry": {
+      "patch": {
+        "summary": "Patch Form Field Geometry",
+        "operationId": "patch_form_field_geometry_api_v1_form_fills__fill_id__fields__field_id__geometry_patch",
+        "parameters": [
+          {
+            "name": "fill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fill Id"
+            }
+          },
+          {
+            "name": "field_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Field Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FormFieldGeometryUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormFillResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/form-fills/{fill_id}/approve-and-export": {
       "post": {
         "summary": "Approve And Export",
@@ -1809,6 +1867,20 @@
         ],
         "title": "EvidenceSourceResponse"
       },
+      "FormFieldGeometryUpdate": {
+        "properties": {
+          "geometry": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Geometry"
+          }
+        },
+        "type": "object",
+        "required": [
+          "geometry"
+        ],
+        "title": "FormFieldGeometryUpdate"
+      },
       "FormFieldUpdate": {
         "properties": {
           "write_value": {
@@ -1827,6 +1899,18 @@
               }
             ],
             "title": "Evidence Fact Ids"
+          },
+          "geometry": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometry"
           }
         },
         "type": "object",
@@ -1917,6 +2001,11 @@
             },
             "type": "array",
             "title": "Answers"
+          },
+          "mapping_metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Mapping Metadata"
           },
           "state": {
             "type": "string",

@@ -6,6 +6,7 @@ import time
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -399,14 +400,32 @@ def run_form_fill_job(session: Session, run_id: str, gateway: ModelGateway | Non
             and field.get("field_type") not in {"action", "signature"}
             and (field.get("current_value") is None or not str(field["current_value"]).strip())
         }
-        fill.answers = [
-            dict(answer, origin="model") for answer in result.get("answers", [])
-            if answer.get("field_id") in mappable
-        ]
+        dispositions = result.get("fact_dispositions", [])
+        supplements = result.get("supplemental_facts", [])
+        supplemental_ids = {
+            "supplemental_" + hashlib.sha256(
+                f"{item.get('key')}|{item.get('value')}|{item.get('source_block_ids')}".encode()
+            ).hexdigest()[:20]: item
+            for item in supplements
+        }
+        # Store mapping metadata on the fill so review can account for every
+        # source fact without requiring a second model call.
+        fill.answers = []
+        for answer in result.get("answers", []):
+            if answer.get("field_id") not in mappable:
+                continue
+            answer = dict(answer, origin="model")
+            cited_blocks = set(answer.get("source_block_ids", []))
+            answer["evidence_fact_ids"] = list(answer.get("evidence_fact_ids", [])) + [
+                identifier for identifier, item in supplemental_ids.items()
+                if cited_blocks.intersection(item.get("source_block_ids", [])) and identifier not in answer.get("evidence_fact_ids", [])
+            ]
+            fill.answers.append(answer)
+        fill.mapping_metadata = {"fact_dispositions": dispositions, "supplemental_facts": supplements}
         fill.model_execution_id = (result.get("model_profile") or {}).get("execution_id")
         fill.state = "mapped"
         fill.error = None
-        run.result = {"form_fill_id": fill.id}
+        run.result = {"form_fill_id": fill.id, "fact_dispositions": dispositions, "supplemental_facts": supplements}
         run.status = RunStatus.SUCCEEDED
         run.stage = "complete"
         run.progress = 100
@@ -428,7 +447,8 @@ def run_form_fill_job(session: Session, run_id: str, gateway: ModelGateway | Non
 
 
 def update_form_field(session: Session, fill: FormFill, field_id: str, write_value: object,
-                      evidence_fact_ids: list[str] | None = None) -> FormFill:
+                      evidence_fact_ids: list[str] | None = None,
+                      geometry: dict[str, Any] | None = None) -> FormFill:
     if fill.state in {"mapping", "mapping_failed"}:
         raise ValueError("Mapping must finish before review edits")
     version = session.get(TemplateVersion, fill.template_version_id)
@@ -437,12 +457,27 @@ def update_form_field(session: Session, fill: FormFill, field_id: str, write_val
         raise ValueError("Template field was not found")
     if field.get("writable") is False or field.get("field_type") in {"action", "signature"}:
         raise ValueError("Template field is not writable")
-    answers = [dict(answer) for answer in (fill.answers or []) if answer.get("field_id") != field_id]
-    answer = {"field_id": field_id, "write_value": write_value, "origin": "human"}
-    if evidence_fact_ids is not None:
-        answer["evidence_fact_ids"] = evidence_fact_ids
-    answers.append(answer)
-    fill.answers = answers
+    geometry_only = geometry is not None and write_value is None and evidence_fact_ids is None
+    if not geometry_only:
+        answers = [dict(answer) for answer in (fill.answers or []) if answer.get("field_id") != field_id]
+        answer = {"field_id": field_id, "write_value": write_value, "origin": "human"}
+        if evidence_fact_ids is not None:
+            answer["evidence_fact_ids"] = evidence_fact_ids
+        answers.append(answer)
+        fill.answers = answers
+    if geometry is not None:
+        rect = geometry.get("rect") if isinstance(geometry, dict) else None
+        page = geometry.get("page") if isinstance(geometry, dict) else None
+        if not isinstance(rect, list) or len(rect) != 4 or not all(isinstance(item, (int, float)) for item in rect):
+            raise ValueError("Field geometry must contain four numeric normalized coordinates")
+        x, y, width, height = (float(item) for item in rect)
+        if not (0 <= x <= 1 and 0 <= y <= 1 and 0 < width <= 1 and 0 < height <= 1 and x + width <= 1 and y + height <= 1):
+            raise ValueError("Field geometry must fit within the PDF page")
+        metadata = dict(fill.mapping_metadata or {})
+        geometries = dict(metadata.get("field_geometry") or {})
+        geometries[field_id] = {"page": int(page or field.get("location", {}).get("page") or 1), "rect": [x, y, width, height], "coordinate_system": "normalized-top-left"}
+        metadata["field_geometry"] = geometries
+        fill.mapping_metadata = metadata
     fill.state = "mapped"
     fill.error = None
     fill.output_storage_key = fill.output_filename = fill.output_media_type = fill.output_sha256 = None

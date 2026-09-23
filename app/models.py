@@ -189,6 +189,7 @@ class FormFill(Base):
     evidence_snapshot_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     agency_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     answers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    mapping_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     model_execution_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     state: Mapped[str] = mapped_column(String(32), default="mapped", index=True)
     output_storage_key: Mapped[str | None] = mapped_column(String(768), nullable=True)

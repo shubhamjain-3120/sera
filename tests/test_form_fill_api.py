@@ -123,3 +123,15 @@ def test_native_write_failure_names_field_and_has_no_download(client):
     assert response.status_code == 422
     assert response.json()["detail"]["field_id"] == "applicant"
     assert http.get(f"/api/v1/form-fills/{fill_id}/output").status_code == 404
+
+
+def test_geometry_review_preserves_answer_metadata_and_invalidates_output(client):
+    http, engine, storage = client
+    fill_id = _fill(engine, storage)
+    before = http.get(f"/api/v1/form-fills/{fill_id}").json()
+    resized = http.patch(f"/api/v1/form-fills/{fill_id}/fields/applicant/geometry", json={
+        "geometry": {"page": 1, "rect": [0.1, 0.2, 0.5, 0.08], "coordinate_system": "normalized-top-left"},
+    })
+    assert resized.status_code == 200
+    assert resized.json()["answers"] == before["answers"]
+    assert resized.json()["fields"][0]["field"]["location"]["coordinate_system"] == "normalized-top-left"

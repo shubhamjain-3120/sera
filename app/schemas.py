@@ -242,6 +242,11 @@ class FormFillCreate(BaseModel):
 class FormFieldUpdate(BaseModel):
     write_value: Any = None
     evidence_fact_ids: list[str] | None = None
+    geometry: dict[str, Any] | None = None
+
+
+class FormFieldGeometryUpdate(BaseModel):
+    geometry: dict[str, Any]
 
 
 class FormFillResponse(BaseModel):
@@ -251,6 +256,7 @@ class FormFillResponse(BaseModel):
     evidence_snapshot_ids: list[str]
     agency_key: str | None = None
     answers: list[dict[str, Any]]
+    mapping_metadata: dict[str, Any] = Field(default_factory=dict)
     state: str
     model_execution_id: str | None = None
     error: str | None = None
