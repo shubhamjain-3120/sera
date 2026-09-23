@@ -11,30 +11,37 @@ depends_on = None
 
 def upgrade() -> None:
     for table in ("review_decisions", "verification_reports", "fill_plan_revisions", "fill_plans", "evidence_bundles"):
-        op.drop_table(table)
-    op.create_table(
-        "form_fills",
-        sa.Column("id", sa.String(length=36), primary_key=True),
-        sa.Column("case_key", sa.String(length=64), nullable=False),
-        sa.Column("template_version_id", sa.String(length=36), sa.ForeignKey("template_versions.id"), nullable=False),
-        sa.Column("evidence_snapshot_ids", sa.JSON(), nullable=False),
-        sa.Column("agency_key", sa.String(length=64), nullable=True),
-        sa.Column("answers", sa.JSON(), nullable=False),
-        sa.Column("model_execution_id", sa.String(length=36), nullable=True),
-        sa.Column("state", sa.String(length=32), nullable=False, server_default="mapped"),
-        sa.Column("output_storage_key", sa.String(length=768), nullable=True),
-        sa.Column("output_filename", sa.String(length=512), nullable=True),
-        sa.Column("output_media_type", sa.String(length=128), nullable=True),
-        sa.Column("output_sha256", sa.String(length=64), nullable=True),
-        sa.Column("error", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("approved_at", sa.DateTime(timezone=True), nullable=True),
-    )
-    op.create_index("ix_form_fills_case_key", "form_fills", ["case_key"])
-    op.create_index("ix_form_fills_template_version_id", "form_fills", ["template_version_id"])
-    op.create_index("ix_form_fills_agency_key", "form_fills", ["agency_key"])
-    op.create_index("ix_form_fills_state", "form_fills", ["state"])
+        if sa.inspect(op.get_bind()).has_table(table):
+            op.drop_table(table)
+    if not sa.inspect(op.get_bind()).has_table("form_fills"):
+        op.create_table(
+            "form_fills",
+            sa.Column("id", sa.String(length=36), primary_key=True),
+            sa.Column("case_key", sa.String(length=64), nullable=False),
+            sa.Column("template_version_id", sa.String(length=36), sa.ForeignKey("template_versions.id"), nullable=False),
+            sa.Column("evidence_snapshot_ids", sa.JSON(), nullable=False),
+            sa.Column("agency_key", sa.String(length=64), nullable=True),
+            sa.Column("answers", sa.JSON(), nullable=False),
+            sa.Column("model_execution_id", sa.String(length=36), nullable=True),
+            sa.Column("state", sa.String(length=32), nullable=False, server_default="mapped"),
+            sa.Column("output_storage_key", sa.String(length=768), nullable=True),
+            sa.Column("output_filename", sa.String(length=512), nullable=True),
+            sa.Column("output_media_type", sa.String(length=128), nullable=True),
+            sa.Column("output_sha256", sa.String(length=64), nullable=True),
+            sa.Column("error", sa.Text(), nullable=True),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("approved_at", sa.DateTime(timezone=True), nullable=True),
+        )
+    existing_indexes = {item["name"] for item in sa.inspect(op.get_bind()).get_indexes("form_fills")}
+    for name, columns in (
+        ("ix_form_fills_case_key", ["case_key"]),
+        ("ix_form_fills_template_version_id", ["template_version_id"]),
+        ("ix_form_fills_agency_key", ["agency_key"]),
+        ("ix_form_fills_state", ["state"]),
+    ):
+        if name not in existing_indexes:
+            op.create_index(name, "form_fills", columns)
 
 
 def downgrade() -> None:
