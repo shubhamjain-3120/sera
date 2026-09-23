@@ -8,6 +8,7 @@ from typing import Annotated, Any
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
+from PIL import Image
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -39,6 +40,7 @@ from app.schemas import (
     EvidenceSourceResponse,
     FormFieldGeometryUpdate,
     FormFieldUpdate,
+    FormAnnotationsUpdate,
     FormFillCreate,
     FormFillResponse,
     FormFillRunResponse,
@@ -57,6 +59,7 @@ from app.services import (
     seed_agencies,
     update_draft,
     update_form_field,
+    update_form_annotations,
 )
 from app.storage import get_storage
 
@@ -210,6 +213,31 @@ def pdf_page(artifact_id: str, page: int, db: Db, scale: float = Query(1.5, ge=0
     except IndexError as exc:
         raise HTTPException(404, str(exc)) from exc
     return Response(image, media_type="image/png")
+
+
+@app.get("/api/v1/artifacts/{artifact_id}/pages/{page}/crop.png")
+def pdf_page_crop(artifact_id: str, page: int, db: Db,
+                  x: float = Query(ge=0, le=1), y: float = Query(ge=0, le=1),
+                  width: float = Query(gt=0, le=1), height: float = Query(gt=0, le=1)) -> Response:
+    if x + width > 1.000001 or y + height > 1.000001:
+        raise HTTPException(422, "Source crop is outside the page")
+    artifact = db.get(Artifact, artifact_id)
+    if not artifact or artifact.kind != ArtifactKind.PDF:
+        raise HTTPException(404, "PDF artifact not found")
+    try:
+        with get_storage().open(artifact.storage_key) as stream:
+            page_image = render_pdf_page(stream, page, 2.0)
+    except IndexError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    with Image.open(BytesIO(page_image)) as image:
+        pad_x, pad_y = image.width * 0.015, image.height * 0.015
+        bounds = (max(0, int(x * image.width - pad_x)), max(0, int(y * image.height - pad_y)),
+                  min(image.width, int((x + width) * image.width + pad_x)),
+                  min(image.height, int((y + height) * image.height + pad_y)))
+        cropped = image.crop(bounds)
+        output = BytesIO()
+        cropped.save(output, format="PNG")
+    return Response(output.getvalue(), media_type="image/png")
 
 
 @app.get("/api/v1/artifacts/{artifact_id}/sheets/{sheet_name}/grid")
@@ -458,7 +486,7 @@ def _snippet_for_fact(snapshot: dict[str, Any], fact: dict[str, Any], snapshot_i
     for provenance in fact.get("provenance", []) or []:
         excerpt = provenance.get("excerpt")
         if excerpt:
-            snippets.append({**provenance, "text": excerpt, "snapshot_id": snapshot_id})
+            snippets.append({**provenance, "text": excerpt, "snapshot_id": snapshot_id, "artifact_id": provenance.get("artifact_id") or snapshot.get("_artifact_id") or snapshot.get("artifact_id")})
     if snippets:
         return snippets
     for block in snapshot.get("parse_blocks", []) or []:
@@ -520,12 +548,13 @@ def _form_response(db: Session, fill: FormFill) -> FormFillResponse:
                     field["widgets"] = widgets
             answer = next((a for a in answers if a.get("field_id") == field.get("id")), None)
             snippets: list[dict[str, Any]] = []
+            original_snippets: list[dict[str, Any]] = []
             if answer:
                 for fact_id in answer.get("evidence_fact_ids", []) or []:
                     match = facts_by_id.get(str(fact_id))
                     if match:
                         fact, snapshot_row = match
-                        snippets.extend(_snippet_for_fact(snapshot_row.snapshot, fact, snapshot_row.id))
+                        snippets.extend(_snippet_for_fact({**snapshot_row.snapshot, "_artifact_id": snapshot_row.artifact_id}, fact, snapshot_row.id))
                     elif str(fact_id) in registry_facts:
                         fact = registry_facts[str(fact_id)]
                         snippets.append({"text": f"Agency registry — {fact['label']}: {fact['value']}", "source": "agency_registry"})
@@ -535,9 +564,24 @@ def _form_response(db: Session, fill: FormFill) -> FormFillResponse:
                         block = raw_blocks[str(block_id)][0]
                     if block and block["text"]:
                         snippets.append(block)
+                proposal = answer.get("model_proposal") or {}
+                for fact_id in proposal.get("evidence_fact_ids", []) or []:
+                    match = facts_by_id.get(str(fact_id))
+                    if match:
+                        fact, snapshot_row = match
+                        original_snippets.extend(_snippet_for_fact({**snapshot_row.snapshot, "_artifact_id": snapshot_row.artifact_id}, fact, snapshot_row.id))
+                for block_id in proposal.get("source_block_ids", []) or []:
+                    block = blocks_by_id.get(str(block_id))
+                    if block is None and len(raw_blocks.get(str(block_id), [])) == 1:
+                        block = raw_blocks[str(block_id)][0]
+                    if block and block["text"]:
+                        original_snippets.append(block)
             fields.append({**(answer or {}), "field": field,
                            "write_value": (answer or {}).get("write_value", field.get("current_value")),
                            "origin": (answer or {}).get("origin", "prefilled"),
+                           "style": ((fill.mapping_metadata or {}).get("field_styles") or {}).get(str(field.get("id"))),
+                           "review_status": ((fill.mapping_metadata or {}).get("review_statuses") or {}).get(str(field.get("id"))),
+                           "original_snippets": original_snippets,
                            "snippets": snippets})
     field_order = [str(item.get("id")) for item in (version.schema.get("fields", []) if version else [])]
     order = {field_id: index for index, field_id in enumerate(field_order)}
@@ -565,7 +609,7 @@ def _form_response(db: Session, fill: FormFill) -> FormFillResponse:
         evidence.append({"fact": fact, "supplemental_fact": item, "used": bool(linked), "field_ids": linked,
                          "disposition": disposition.get("disposition", "needs_review"),
                          "reason": disposition.get("reason"), "explanation": item.get("explanation")})
-    return FormFillResponse(id=fill.id, case_key=fill.case_key, template_version_id=fill.template_version_id, template_name=version.name if version else "", target_artifact_id=artifact.id if artifact else "", target_kind=artifact.kind.value if artifact else "", status=fill.state, output_available=fill.state == "exported" and bool(fill.output_storage_key), output_error=fill.error, fields=fields, evidence=evidence, answers=answers, mapping_metadata=fill.mapping_metadata or {}, evidence_snapshot_ids=fill.evidence_snapshot_ids or [], agency_key=fill.agency_key, state=fill.state, model_execution_id=fill.model_execution_id, error=fill.error, output_filename=fill.output_filename, output_media_type=fill.output_media_type, output_sha256=fill.output_sha256, created_at=fill.created_at, updated_at=fill.updated_at, approved_at=fill.approved_at)
+    return FormFillResponse(id=fill.id, case_key=fill.case_key, template_version_id=fill.template_version_id, template_name=version.name if version else "", page_count=(version.schema.get("inspection") or {}).get("page_count") if version else None, target_artifact_id=artifact.id if artifact else "", target_kind=artifact.kind.value if artifact else "", status=fill.state, output_available=fill.state == "exported" and bool(fill.output_storage_key), output_error=fill.error, fields=fields, evidence=evidence, answers=answers, mapping_metadata=fill.mapping_metadata or {}, evidence_snapshot_ids=fill.evidence_snapshot_ids or [], agency_key=fill.agency_key, state=fill.state, model_execution_id=fill.model_execution_id, error=fill.error, output_filename=fill.output_filename, output_media_type=fill.output_media_type, output_sha256=fill.output_sha256, created_at=fill.created_at, updated_at=fill.updated_at, approved_at=fill.approved_at)
 
 
 @app.post("/api/v1/form-fills", response_model=FormFillRunResponse, status_code=202)
@@ -600,7 +644,8 @@ def patch_form_field(fill_id: str, field_id: str, request: FormFieldUpdate, db: 
     if not fill:
         raise HTTPException(404, "Form fill not found")
     try:
-        return _form_response(db, update_form_field(db, fill, field_id, request.write_value, request.evidence_fact_ids, request.geometry))
+        return _form_response(db, update_form_field(db, fill, field_id, request.write_value, request.evidence_fact_ids, request.geometry,
+            write_value_supplied="write_value" in request.model_fields_set, style=request.style, review_status=request.review_status))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -611,7 +656,18 @@ def patch_form_field_geometry(fill_id: str, field_id: str, request: FormFieldGeo
     if not fill:
         raise HTTPException(404, "Form fill not found")
     try:
-        return _form_response(db, update_form_field(db, fill, field_id, None, None, request.geometry))
+        return _form_response(db, update_form_field(db, fill, field_id, None, None, request.geometry, write_value_supplied=False))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.put("/api/v1/form-fills/{fill_id}/annotations", response_model=FormFillResponse)
+def put_form_annotations(fill_id: str, request: FormAnnotationsUpdate, db: Db) -> FormFillResponse:
+    fill = db.get(FormFill, fill_id)
+    if not fill:
+        raise HTTPException(404, "Form fill not found")
+    try:
+        return _form_response(db, update_form_annotations(db, fill, request.annotations))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -639,9 +695,15 @@ def approve_and_export(fill_id: str, db: Db) -> FormFillResponse:
         location = dict(field.get("location") or {})
         location.update({"page": int(item.get("page") or location.get("page") or 1), "rect": [x, y, x + width, y + height], "coordinate_system": "normalized-top-left"})
         field["location"] = location
+        widgets = list(field.get("widgets") or [])
+        if widgets:
+            widgets[0] = location
+            field["widgets"] = widgets
     try:
         with get_storage().open(artifact.storage_key) as source:
-            output = write_form(source.read(), schema_for_output, values, artifact.kind.value)
+            output = write_form(source.read(), schema_for_output, values, artifact.kind.value,
+                                annotations=(fill.mapping_metadata or {}).get("annotations") or [],
+                                field_styles=(fill.mapping_metadata or {}).get("field_styles") or {})
     except FormWriteError as exc:
         fill.state = "export_failed"
         fill.error = f"{exc.field_id}: {exc.message}"

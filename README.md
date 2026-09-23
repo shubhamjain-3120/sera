@@ -26,10 +26,10 @@ Open [http://localhost:5173](http://localhost:5173). API docs are at [http://loc
 1. Upload a blank PDF or XLSX target, inspect its fields, and publish a template version.
    For a workbook, add the actual row cells you want filled before publishing; a detected dropdown range alone does not identify a particular record row.
 2. Upload client intake sources to a case. The evidence pipeline stores source blocks and facts with their original locations. Do not upload filled reference forms as evidence.
-3. Create a form fill using the published template and case evidence. One `gpt-6-sol` mapping call runs at high reasoning in fast mode and returns native field values with fact/block citations. Agency details are available to mapping.
+3. Create a form fill using the published template and case evidence. One `gpt-6-sol` mapping call runs at high reasoning with standard processing and returns native field values with fact/block citations. Agency details are available to mapping.
 4. Review every field in the PDF or workbook overlay. Hover a mapped field to see its stored source snippet. Edit or clear values, optionally linking an intake fact. Unlinked manual entries display “Entered by reviewer.” Existing template values persist until changed.
 5. Inspect the business, people, vehicles, coverage, and other intake facts. Used means a current field cites the fact. Unused facts stay visible, and can be linked to a field; they do not block approval.
-6. Approve the whole form, preview the generated PDF when applicable, and download the PDF or XLSX. A native writer error names the affected field and prevents download. Editing later removes approval and requires another generation.
+6. Approve the whole form, preview the generated PDF when applicable, and download the PDF or XLSX. For PDFs, choose **Edit filled PDF** to fill native form fields, add markup, apply redactions, or move, rotate, and delete pages, then download a separate edited copy. The generated output remains unchanged. A native writer error names the affected field and prevents download. Editing mapped values later removes approval and requires another generation.
 
 The database migration removes legacy Fill Plans, review decisions, and verification reports. It preserves templates and evidence snapshots. The reference filled files are for manual comparison only and are never mapping inputs.
 

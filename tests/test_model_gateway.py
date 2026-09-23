@@ -41,7 +41,7 @@ def session():
 def response(*, parsed=None, status="completed", output=None, incomplete=None):
     return SimpleNamespace(
         id="resp_123",
-        service_tier="fast",
+        service_tier="default",
         status=status,
         output_parsed=parsed,
         output=output or [],

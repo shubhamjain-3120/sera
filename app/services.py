@@ -448,7 +448,10 @@ def run_form_fill_job(session: Session, run_id: str, gateway: ModelGateway | Non
 
 def update_form_field(session: Session, fill: FormFill, field_id: str, write_value: object,
                       evidence_fact_ids: list[str] | None = None,
-                      geometry: dict[str, Any] | None = None) -> FormFill:
+                      geometry: dict[str, Any] | None = None,
+                      *, write_value_supplied: bool = True,
+                      style: dict[str, Any] | None = None,
+                      review_status: str | None = None) -> FormFill:
     if fill.state in {"mapping", "mapping_failed"}:
         raise ValueError("Mapping must finish before review edits")
     version = session.get(TemplateVersion, fill.template_version_id)
@@ -457,14 +460,33 @@ def update_form_field(session: Session, fill: FormFill, field_id: str, write_val
         raise ValueError("Template field was not found")
     if field.get("writable") is False or field.get("field_type") in {"action", "signature"}:
         raise ValueError("Template field is not writable")
-    geometry_only = geometry is not None and write_value is None and evidence_fact_ids is None
-    if not geometry_only:
+    if write_value_supplied:
         answers = [dict(answer) for answer in (fill.answers or []) if answer.get("field_id") != field_id]
-        answer = {"field_id": field_id, "write_value": write_value, "origin": "human"}
+        previous = next((dict(answer) for answer in (fill.answers or []) if answer.get("field_id") == field_id), {})
+        answer = {**previous, "field_id": field_id, "write_value": write_value, "origin": "human"}
+        if previous.get("origin") == "model" and "model_proposal" not in answer:
+            answer["model_proposal"] = {key: value for key, value in previous.items() if key != "model_proposal"}
         if evidence_fact_ids is not None:
             answer["evidence_fact_ids"] = evidence_fact_ids
+        else:
+            answer["evidence_fact_ids"] = []
+            answer["source_block_ids"] = []
         answers.append(answer)
         fill.answers = answers
+    if style is not None:
+        if style.get("font") not in {"Helvetica", "Times-Roman", "Courier"} or not isinstance(style.get("size"), (int, float)) or not 6 <= style["size"] <= 36 or not isinstance(style.get("bold"), bool) or not isinstance(style.get("italic"), bool):
+            raise ValueError("Unsupported font style")
+        metadata = dict(fill.mapping_metadata or {})
+        styles = dict(metadata.get("field_styles") or {})
+        styles[field_id] = style
+        metadata["field_styles"] = styles
+        fill.mapping_metadata = metadata
+    if review_status is not None:
+        metadata = dict(fill.mapping_metadata or {})
+        statuses = dict(metadata.get("review_statuses") or {})
+        statuses[field_id] = review_status
+        metadata["review_statuses"] = statuses
+        fill.mapping_metadata = metadata
     if geometry is not None:
         rect = geometry.get("rect") if isinstance(geometry, dict) else None
         page = geometry.get("page") if isinstance(geometry, dict) else None
@@ -480,6 +502,43 @@ def update_form_field(session: Session, fill: FormFill, field_id: str, write_val
         fill.mapping_metadata = metadata
     fill.state = "mapped"
     fill.error = None
+    fill.output_storage_key = fill.output_filename = fill.output_media_type = fill.output_sha256 = None
+    fill.approved_at = None
+    session.commit()
+    session.refresh(fill)
+    return fill
+
+
+def update_form_annotations(session: Session, fill: FormFill, annotations: list[dict[str, Any]]) -> FormFill:
+    if fill.state in {"mapping", "mapping_failed"}:
+        raise ValueError("Mapping must finish before review edits")
+    version = session.get(TemplateVersion, fill.template_version_id)
+    page_count = int((version.schema.get("inspection") or {}).get("page_count") or max((int(field.get("location", {}).get("page") or 1) for field in (version.schema.get("fields", []) if version else [])), default=1)) if version else 1
+    if len(annotations) > 500:
+        raise ValueError("Too many page annotations")
+    seen: set[str] = set()
+    for item in annotations:
+        identifier = item.get("id")
+        rect = item.get("rect")
+        if not isinstance(identifier, str) or not identifier or identifier in seen:
+            raise ValueError("Annotations need unique IDs")
+        seen.add(identifier)
+        if item.get("kind") not in {"text", "check", "Y", "N"} or not isinstance(item.get("text"), str) or len(item["text"]) > 500:
+            raise ValueError("Invalid annotation text")
+        if not isinstance(item.get("page"), int) or not 1 <= item["page"] <= page_count:
+            raise ValueError("Annotation page is outside the form")
+        if not isinstance(rect, list) or len(rect) != 4 or not all(isinstance(value, (int, float)) for value in rect):
+            raise ValueError("Annotation rectangle is invalid")
+        x, y, width, height = rect
+        if not (0 <= x <= 1 and 0 <= y <= 1 and 0 < width <= 1 and 0 < height <= 1 and x + width <= 1 and y + height <= 1):
+            raise ValueError("Annotation must fit on the page")
+        style = item.get("style") or {}
+        if style.get("font") not in {"Helvetica", "Times-Roman", "Courier"} or not isinstance(style.get("size"), (int, float)) or not 6 <= style["size"] <= 36 or not isinstance(style.get("bold"), bool) or not isinstance(style.get("italic"), bool):
+            raise ValueError("Unsupported annotation style")
+    metadata = dict(fill.mapping_metadata or {})
+    metadata["annotations"] = annotations
+    fill.mapping_metadata = metadata
+    fill.state = "mapped"
     fill.output_storage_key = fill.output_filename = fill.output_media_type = fill.output_sha256 = None
     fill.approved_at = None
     session.commit()

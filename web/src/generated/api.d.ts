@@ -73,6 +73,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/artifacts/{artifact_id}/pages/{page}/crop.png": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pdf Page Crop */
+        get: operations["pdf_page_crop_api_v1_artifacts__artifact_id__pages__page__crop_png_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/artifacts/{artifact_id}/sheets/{sheet_name}/grid": {
         parameters: {
             query?: never;
@@ -312,6 +329,23 @@ export interface paths {
         head?: never;
         /** Patch Form Field Geometry */
         patch: operations["patch_form_field_geometry_api_v1_form_fills__fill_id__fields__field_id__geometry_patch"];
+        trace?: never;
+    };
+    "/api/v1/form-fills/{fill_id}/annotations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Form Annotations */
+        put: operations["put_form_annotations_api_v1_form_fills__fill_id__annotations_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/form-fills/{fill_id}/approve-and-export": {
@@ -637,6 +671,13 @@ export interface components {
             /** Snapshot Id */
             snapshot_id?: string | null;
         };
+        /** FormAnnotationsUpdate */
+        FormAnnotationsUpdate: {
+            /** Annotations */
+            annotations: {
+                [key: string]: unknown;
+            }[];
+        };
         /** FormFieldGeometryUpdate */
         FormFieldGeometryUpdate: {
             /** Geometry */
@@ -654,6 +695,12 @@ export interface components {
             geometry?: {
                 [key: string]: unknown;
             } | null;
+            /** Style */
+            style?: {
+                [key: string]: unknown;
+            } | null;
+            /** Review Status */
+            review_status?: ("accepted" | "needs_review") | null;
         };
         /** FormFillCreate */
         FormFillCreate: {
@@ -715,6 +762,8 @@ export interface components {
              * @default
              */
             template_name: string;
+            /** Page Count */
+            page_count?: number | null;
             /**
              * Target Artifact Id
              * @default
@@ -1135,6 +1184,43 @@ export interface operations {
         parameters: {
             query?: {
                 scale?: number;
+            };
+            header?: never;
+            path: {
+                artifact_id: string;
+                page: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pdf_page_crop_api_v1_artifacts__artifact_id__pages__page__crop_png_get: {
+        parameters: {
+            query: {
+                x: number;
+                y: number;
+                width: number;
+                height: number;
             };
             header?: never;
             path: {
@@ -1683,6 +1769,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["FormFieldGeometryUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormFillResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_form_annotations_api_v1_form_fills__fill_id__annotations_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fill_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FormAnnotationsUpdate"];
             };
         };
         responses: {

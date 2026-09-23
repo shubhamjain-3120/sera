@@ -1,4 +1,4 @@
-import type { Agency, Artifact, CaseSummary, Draft, EvidenceSnapshot, EvidenceSource, FormFill, FormFillSummary, Run, TemplateSchema, TemplateVersion } from "./types";
+import type { Agency, Artifact, CaseSummary, Draft, EvidenceSnapshot, EvidenceSource, FormFill, FormFillSummary, PageAnnotation, ReviewStyle, Run, TemplateSchema, TemplateVersion } from "./types";
 
 export const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -61,7 +61,7 @@ export const api = {
       body: JSON.stringify({ details }),
     }),
   listCases: () => request<CaseSummary[]>("/api/v1/cases"),
-  updateFormFillField: (id: string, fieldId: string, input: { write_value: unknown; evidence_fact_ids?: string[]; geometry?: { page: number; rect: [number, number, number, number]; coordinate_system: "normalized-top-left" } }) =>
+  updateFormFillField: (id: string, fieldId: string, input: { write_value?: unknown; evidence_fact_ids?: string[]; geometry?: { page: number; rect: [number, number, number, number]; coordinate_system: "normalized-top-left" }; style?: ReviewStyle; review_status?: "accepted" | "needs_review" }) =>
     request<FormFill>(`/api/v1/form-fills/${id}/fields/${encodeURIComponent(fieldId)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -71,6 +71,9 @@ export const api = {
     request<FormFill>(`/api/v1/form-fills/${id}/fields/${encodeURIComponent(fieldId)}/geometry`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ geometry }),
     }),
+  updateFormAnnotations: (id: string, annotations: PageAnnotation[]) => request<FormFill>(`/api/v1/form-fills/${id}/annotations`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annotations }),
+  }),
   approveAndExport: (id: string) => request<FormFill>(`/api/v1/form-fills/${id}/approve-and-export`, { method: "POST" }),
   formFillOutput: (id: string) => `${API}/api/v1/form-fills/${id}/output`,
   grid: (artifactId: string, sheet: string, row = 1, column = 1) => {

@@ -1,46 +1,51 @@
 import { expect, test } from "@playwright/test";
 
-test("reviews mapped and unused facts, then exports a whole form", async ({ page }) => {
+test("reviews a tentative answer, adds marks, and warns before download", async ({ page }) => {
   const data = {
-    id: "fill-1", case_key: "case-1", template_version_id: "version-1",
-    template_name: "Rivington", target_artifact_id: "target-1", target_kind: "pdf",
-    status: "mapped", output_available: false, output_error: null,
+    id: "fill-1", case_key: "case-1", template_version_id: "version-1", template_name: "Carrier",
+    target_artifact_id: "target-1", target_kind: "pdf", status: "mapped", output_available: false,
     fields: [{ field: { id: "name", label: "Applicant name", field_type: "text", writable: true,
       location: { kind: "pdf_rect", page: 1, rect: [20, 30, 160, 50], page_width: 612, page_height: 792 } },
-      write_value: "Alice", origin: "model", evidence_fact_ids: ["fact-a"],
-      snippets: [{ text: "Applicant: Alice" }] }],
-    evidence: [
-      { fact: { id: "fact-a", label: "Applicant", value: "Alice", entity_role: "applicant" }, used: true, field_ids: ["name"] },
-      { fact: { id: "fact-b", label: "Driver", value: "Bob", entity_role: "driver" }, used: false, field_ids: [] },
-    ],
+      write_value: "Alice", origin: "model", classification: "tentative", snippets: [{ text: "Applicant: Alice" }] },
+      { field: { id: "yesno", label: "Has drivers?", field_type: "boolean", writable: true,
+        location: { kind: "pdf_rect", page: 1, rect: [180, 30, 200, 50], page_width: 612, page_height: 792 } },
+        write_value: null, origin: "prefilled", snippets: [] }],
+    evidence: [], mapping_metadata: { annotations: [] },
   };
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pS8AAAAASUVORK5CYII=", "base64");
   await page.route("**/api/v1/form-fills/fill-1", (route) => route.fulfill({ json: data }));
-  await page.route("**/api/v1/form-fills/fill-1/fields/name", (route) => {
-    data.fields[0].write_value = "Bob";
-    data.fields[0].origin = "human";
-    data.fields[0].evidence_fact_ids = ["fact-b"];
-    data.fields[0].snippets = [{ text: "Driver: Bob" }];
-    data.evidence[0].used = false;
-    data.evidence[1].used = true;
+  await page.route("**/api/v1/form-fills/fill-1/fields/name", async (route) => {
+    const patch = route.request().postDataJSON();
+    Object.assign(data.fields[0], { write_value: patch.write_value ?? data.fields[0].write_value, review_status: patch.review_status ?? null });
     return route.fulfill({ json: data });
   });
-  await page.route("**/api/v1/form-fills/fill-1/approve-and-export", (route) => {
-    data.status = "exported";
-    data.output_available = true;
+  let yesNoValue: unknown = null;
+  await page.route("**/api/v1/form-fills/fill-1/fields/yesno", async (route) => {
+    yesNoValue = route.request().postDataJSON().write_value;
     return route.fulfill({ json: data });
   });
-  await page.route("**/api/v1/form-fills/fill-1/output**", (route) => route.fulfill({ contentType: "application/pdf", body: "" }));
-  await page.route("**/api/v1/artifacts/target-1/pages/1.png**", (route) => route.fulfill({ contentType: "image/png", body: "" }));
+  await page.route("**/api/v1/form-fills/fill-1/annotations", async (route) => {
+    data.mapping_metadata.annotations = route.request().postDataJSON().annotations;
+    return route.fulfill({ json: data });
+  });
+  await page.route("**/api/v1/artifacts/target-1/pages/1.png**", (route) => route.fulfill({ contentType: "image/png", body: png }));
   await page.goto("/form-fills/fill-1");
-
-  await expect(page.getByText("1 used · 1 unused")).toBeVisible();
-  await expect(page.locator("button.pdf-field")).toHaveAttribute("title", "Applicant: Alice");
-  await page.getByText("Driver: Bob").click();
-  await expect(page.getByText("Use selected intake fact")).toBeVisible();
-  await page.getByRole("button", { name: "Save to field" }).click();
-  await expect(page.locator("button.pdf-field")).toHaveAttribute("title", "Driver: Bob");
-  await page.getByRole("button", { name: /Approve & Generate/ }).click();
-  await expect(page.getByRole("link", { name: "Download generated file" })).toBeVisible();
+  await expect(page.getByText("1 need review")).toBeVisible();
+  await page.getByRole("button", { name: "Download PDF" }).click();
+  await expect(page.getByRole("dialog")).toContainText("1 answers still need review");
+  await page.getByRole("button", { name: "Continue reviewing" }).click();
+  await page.getByRole("button", { name: "+ Y" }).click();
+  await page.locator(".review-paper").click({ position: { x: 300, y: 300 } });
+  await expect(page.locator(".review-annotation")).toContainText("Y");
+  await expect.poll(() => data.mapping_metadata.annotations.length).toBe(1);
+  await page.getByRole("button", { name: "+ Y" }).click();
+  await page.locator(".review-field").nth(1).click();
+  await expect.poll(() => yesNoValue).toBe(true);
+  await page.locator(".review-field").first().click();
+  await page.getByRole("textbox", { name: "Edit Applicant name on form" }).fill("Bob");
+  await page.getByRole("textbox", { name: "Edit Applicant name on form" }).blur();
+  await expect.poll(() => data.fields[0].write_value).toBe("Bob");
+  await expect(page.getByText("0 need review")).toBeVisible();
 });
 
 test("shows the affected field when native output writing fails", async ({ page }) => {

@@ -184,7 +184,7 @@ export interface CaseSummary {
 export type FormFillAnswerKind = "supported" | "inferred" | "tentative" | "human" | "unknown";
 export type FactDisposition = "mapped" | "partial" | "no_destination" | "needs_review" | string;
 export interface SupplementalFact { label: string; key: string; value: unknown; raw_value?: string; source_block_ids?: string[]; explanation?: string | null; classification?: FormFillAnswerKind | string }
-export interface FormFillSnippet { text: string; artifact_id?: string; snapshot_id?: string; page?: number; rect?: number[]; sheet?: string; cell_range?: string }
+export interface FormFillSnippet { text: string; artifact_id?: string; snapshot_id?: string; kind?: string; coordinate_system?: string; page_width?: number; page_height?: number; page?: number; rect?: number[]; sheet?: string; cell_range?: string }
 export interface FormFillField {
   field: TemplateField;
   write_value: unknown;
@@ -196,7 +196,14 @@ export interface FormFillField {
   evidence_fact_ids?: string[];
   source_block_ids?: string[];
   snippets?: FormFillSnippet[];
+  original_snippets?: FormFillSnippet[];
+  model_proposal?: { evidence_fact_ids?: string[]; source_block_ids?: string[]; [key: string]: unknown };
+  confidence?: "high" | "medium" | "low" | null;
+  review_status?: "accepted" | "needs_review" | null;
+  style?: ReviewStyle | null;
 }
+export interface ReviewStyle { font: "Helvetica" | "Times-Roman" | "Courier"; size: number; bold: boolean; italic: boolean }
+export interface PageAnnotation { id: string; kind: "text" | "check" | "Y" | "N"; text: string; page: number; rect: [number, number, number, number]; style: ReviewStyle }
 export interface FormFillEvidence {
   fact: EvidenceFact;
   supplemental_fact?: SupplementalFact;
@@ -211,5 +218,5 @@ export interface FormFillEvidence {
   substantive?: boolean;
 }
 export interface FormFillSummary { id: string; case_key: string; template_version_id: string; template_name: string; target_artifact_id: string; target_kind: "pdf" | "xlsx"; status: string; output_available?: boolean; output_error?: string | null; created_at?: string; updated_at?: string }
-export interface FormFill extends FormFillSummary { agency_key?: string; fields: FormFillField[]; evidence: FormFillEvidence[]; mapping_metadata?: { fact_dispositions?: Array<{ fact_id: string; disposition: FactDisposition; field_ids?: string[]; reason?: string | null }>; supplemental_facts?: SupplementalFact[]; [key: string]: unknown }; output_path?: string | null }
+export interface FormFill extends FormFillSummary { agency_key?: string; page_count?: number | null; fields: FormFillField[]; evidence: FormFillEvidence[]; mapping_metadata?: { fact_dispositions?: Array<{ fact_id: string; disposition: FactDisposition; field_ids?: string[]; reason?: string | null }>; supplemental_facts?: SupplementalFact[]; annotations?: PageAnnotation[]; [key: string]: unknown }; output_path?: string | null }
 export interface FormFieldGeometry { page: number; rect: [number, number, number, number]; coordinate_system: "normalized-top-left" }

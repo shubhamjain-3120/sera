@@ -174,6 +174,13 @@ class ModelGateway:
             {"role": "system", "content": instructions},
             {"role": "user", "content": json.dumps(_jsonable(input_data), ensure_ascii=False)},
         ]
+        request_payload = {
+            "model": model,
+            "input": request_input,
+            "reasoning": {"effort": self.settings.openai_reasoning_effort},
+            "service_tier": self.settings.openai_service_tier,
+            "output_schema": output_model.model_json_schema(),
+        }
         max_retries = max(0, self.settings.model_gateway_max_retries)
         for attempt in range(max_retries + 1):
             error = None
@@ -245,6 +252,7 @@ class ModelGateway:
             run_id=run_id,
             stage=stage,
             input_sha256=input_hash,
+            input_payload=request_payload,
             output_sha256=_sha256(output) if output is not None else None,
             output_payload=output.model_dump(mode="json") if output is not None else None,
             provider="openai",

@@ -47,6 +47,17 @@ def test_native_pdf_text_field_autosizes_long_value():
     assert sizes and min(sizes) < 12
 
 
+def test_styled_native_answer_keeps_its_form_value_and_visible_text():
+    field = {"id": "applicant", "native_name": "applicant", "field_type": "text", "current_value": None,
+             "location": {"kind": "pdf_rect", "page": 1, "rect": [20, 250, 160, 270]}}
+    style = {"font": "Times-Roman", "size": 12, "bold": True, "italic": False}
+    output = write_form(_native_pdf(), {"fields": [field]}, {"applicant": "Alice"}, "pdf",
+                        field_styles={"applicant": style})
+    reader = PdfReader(BytesIO(output))
+    assert reader.get_fields()["applicant"]["/V"] == "Alice"
+    assert "Alice" in reader.pages[0].extract_text()
+
+
 def test_normalized_geometry_resizes_flat_pdf_overlay():
     field = {
         "id": "applicant", "field_type": "text",

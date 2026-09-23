@@ -1,5 +1,7 @@
 from io import BytesIO
 
+from PIL import Image
+
 import pytest
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
@@ -135,3 +137,55 @@ def test_geometry_review_preserves_answer_metadata_and_invalidates_output(client
     assert resized.status_code == 200
     assert resized.json()["answers"] == before["answers"]
     assert resized.json()["fields"][0]["field"]["location"]["coordinate_system"] == "normalized-top-left"
+
+
+def test_review_marks_styles_and_original_provenance_survive_export(client):
+    http, engine, storage = client
+    fill_id = _fill(engine, storage)
+    changed = http.patch(f"/api/v1/form-fills/{fill_id}/fields/applicant", json={
+        "write_value": "Reviewer name", "review_status": "accepted",
+        "style": {"font": "Times-Roman", "size": 12, "bold": True, "italic": False},
+    })
+    assert changed.status_code == 200
+    answer = changed.json()["fields"][0]
+    assert answer["model_proposal"]["evidence_fact_ids"] == ["fact-a"]
+    assert answer["original_snippets"][0]["text"] == "Applicant: Alice"
+    marks = [
+        {"id": f"mark-{kind}", "kind": kind, "text": text, "page": 1,
+         "rect": [0.1 + index * 0.1, 0.5, 0.06, 0.05],
+         "style": {"font": "Helvetica", "size": 11, "bold": False, "italic": False}}
+        for index, (kind, text) in enumerate([("check", "✓"), ("Y", "Y"), ("N", "N")])
+    ]
+    saved = http.put(f"/api/v1/form-fills/{fill_id}/annotations", json={"annotations": marks})
+    assert saved.status_code == 200
+    assert len(saved.json()["mapping_metadata"]["annotations"]) == 3
+    assert http.post(f"/api/v1/form-fills/{fill_id}/approve-and-export").status_code == 200
+    pdf = PdfReader(BytesIO(http.get(f"/api/v1/form-fills/{fill_id}/output").content))
+    text = pdf.pages[0].extract_text()
+    assert "Reviewer name" in text
+    assert "Y" in text and "N" in text
+    assert "Applicant: Alice" not in text
+
+
+def test_invalid_mark_does_not_discard_existing_review(client):
+    http, engine, storage = client
+    fill_id = _fill(engine, storage)
+    original = http.get(f"/api/v1/form-fills/{fill_id}").json()["answers"]
+    response = http.put(f"/api/v1/form-fills/{fill_id}/annotations", json={"annotations": [
+        {"id": "outside", "kind": "Y", "text": "Y", "page": 1, "rect": [0.9, 0.9, 0.2, 0.2],
+         "style": {"font": "Helvetica", "size": 11, "bold": False, "italic": False}}
+    ]})
+    assert response.status_code == 422
+    assert http.get(f"/api/v1/form-fills/{fill_id}").json()["answers"] == original
+
+
+def test_source_crop_returns_the_cited_pdf_region(client):
+    http, engine, storage = client
+    fill_id = _fill(engine, storage)
+    artifact_id = http.get(f"/api/v1/form-fills/{fill_id}").json()["target_artifact_id"]
+    full = Image.open(BytesIO(http.get(f"/api/v1/artifacts/{artifact_id}/pages/1.png?scale=2").content))
+    crop = http.get(f"/api/v1/artifacts/{artifact_id}/pages/1/crop.png?x=0.1&y=0.1&width=0.2&height=0.1")
+    assert crop.status_code == 200
+    image = Image.open(BytesIO(crop.content))
+    assert image.width < full.width and image.height < full.height
+    assert http.get(f"/api/v1/artifacts/{artifact_id}/pages/1/crop.png?x=0.9&y=0.9&width=0.2&height=0.2").status_code == 422

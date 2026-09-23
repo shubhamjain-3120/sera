@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
-from app.mapping import MappingAnswer, MappingOutput, map_form
+from app.mapping import MappingAnswer, MappingOutput, _mapping_settings, map_form
+from app.config import Settings
 
 
 class Gateway:
@@ -18,6 +19,14 @@ class Gateway:
             model="gpt-6-sol", prompt_version="prompt", schema_version="schema",
             execution_id="execution-1",
         )
+
+
+def test_default_model_profile_uses_sol_high_standard():
+    settings = Settings(_env_file=None)
+    assert settings.openai_evidence_model == settings.openai_mapping_model == "gpt-6-sol"
+    assert settings.openai_reasoning_effort == "high"
+    assert settings.openai_service_tier == "default"
+    assert _mapping_settings().openai_service_tier == "default"
 
 
 def test_mapping_sends_all_fields_and_evidence_in_one_call():

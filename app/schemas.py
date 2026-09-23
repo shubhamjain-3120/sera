@@ -243,6 +243,12 @@ class FormFieldUpdate(BaseModel):
     write_value: Any = None
     evidence_fact_ids: list[str] | None = None
     geometry: dict[str, Any] | None = None
+    style: dict[str, Any] | None = None
+    review_status: Literal["accepted", "needs_review"] | None = None
+
+
+class FormAnnotationsUpdate(BaseModel):
+    annotations: list[dict[str, Any]]
 
 
 class FormFieldGeometryUpdate(BaseModel):
@@ -267,6 +273,7 @@ class FormFillResponse(BaseModel):
     updated_at: datetime
     approved_at: datetime | None = None
     template_name: str = ""
+    page_count: int | None = None
     target_artifact_id: str = ""
     target_kind: str = ""
     status: str = "mapped"

@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     openai_base_url: str | None = None
     openai_evidence_model: str = "gpt-6-sol"
     openai_mapping_model: str = "gpt-6-sol"
-    openai_reasoning_effort: str = "medium"
-    openai_service_tier: str = "fast"
+    openai_reasoning_effort: str = "high"
+    openai_service_tier: str = "default"
     model_gateway_max_retries: int = 2
     model_gateway_timeout_seconds: float = 300.0
     s3_endpoint_url: str = "http://localhost:9000"

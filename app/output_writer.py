@@ -117,7 +117,39 @@ def _resize_native_widget(writer: PdfWriter, field: dict[str, Any]) -> bool:
     return False
 
 
-def _write_pdf(original: bytes, fields: list[dict[str, Any]], values: dict[str, Any]) -> bytes:
+def _remove_native_widgets(writer: PdfWriter, name: str) -> None:
+    """Hide a styled field's native appearance so the reviewed overlay stays visible."""
+    for page in writer.pages:
+        annotations = page.get("/Annots")
+        if not annotations:
+            continue
+        keep = ArrayObject()
+        for annotation_ref in annotations:
+            annotation = annotation_ref.get_object()
+            parent = annotation.get("/Parent")
+            parent_obj = parent.get_object() if parent else annotation
+            try:
+                qualified = writer._get_qualified_field_name(parent=parent_obj)
+            except Exception:
+                qualified = str(parent_obj.get("/T", ""))
+            if qualified != name:
+                keep.append(annotation_ref)
+        page[NameObject("/Annots")] = keep
+
+
+def _font_name(style: dict[str, Any]) -> str:
+    family = style.get("font", "Helvetica")
+    bold, italic = style.get("bold", False), style.get("italic", False)
+    if family == "Times-Roman":
+        return "Times-BoldItalic" if bold and italic else "Times-Bold" if bold else "Times-Italic" if italic else "Times-Roman"
+    if family == "Courier":
+        return "Courier-BoldOblique" if bold and italic else "Courier-Bold" if bold else "Courier-Oblique" if italic else "Courier"
+    return "Helvetica-BoldOblique" if bold and italic else "Helvetica-Bold" if bold else "Helvetica-Oblique" if italic else "Helvetica"
+
+
+def _write_pdf(original: bytes, fields: list[dict[str, Any]], values: dict[str, Any],
+               annotations: list[dict[str, Any]] | None = None,
+               field_styles: dict[str, dict[str, Any]] | None = None) -> bytes:
     writer = PdfWriter()
     writer.clone_document_from_reader(PdfReader(io.BytesIO(original)))
     autosize_names = {
@@ -128,6 +160,7 @@ def _write_pdf(original: bytes, fields: list[dict[str, Any]], values: dict[str, 
     }
     _enable_native_autosize(writer, autosize_names)
     overlays: dict[int, list[tuple[dict[str, Any], Any]]] = defaultdict(list)
+    field_styles = field_styles or {}
     changed = False
     for field in fields:
         if field.get("writable") is False or field.get("field_type") in {"action", "signature"}:
@@ -143,10 +176,24 @@ def _write_pdf(original: bytes, fields: list[dict[str, Any]], values: dict[str, 
             continue
         value = values[field_id]
         previous = field.get("current_value")
-        if value == previous or (_is_blank(value) and _is_blank(previous)):
+        styled = field_id in field_styles and field.get("field_type") in {"text", "number", "date"}
+        if not styled and (value == previous or (_is_blank(value) and _is_blank(previous))):
             continue
         changed = True
         name = field.get("native_full_name") or field.get("native_name")
+        if styled:
+            field = {**field, "style": field_styles[field_id]}
+            if name:
+                try:
+                    writer.update_page_form_field_values(None, {str(name): _pdf_value(field, value)}, auto_regenerate=True)
+                    _remove_native_widgets(writer, str(name))
+                except Exception as exc:
+                    raise FormWriteError(field_id, f"Could not style native field: {exc}") from exc
+            if not _is_blank(value):
+                for location in field.get("widgets") or [field.get("location") or {}]:
+                    overlay_field = {**field, "location": location}
+                    overlays[int(location.get("page") or 1) - 1].append((overlay_field, value))
+            continue
         if not name:
             if not _is_blank(value):
                 location = field.get("location") or {}
@@ -174,6 +221,14 @@ def _write_pdf(original: bytes, fields: list[dict[str, Any]], values: dict[str, 
             )
         except Exception as exc:
             raise FormWriteError(field_id, f"Could not write PDF field: {exc}") from exc
+    for annotation in annotations or []:
+        page_index = int(annotation["page"]) - 1
+        if not 0 <= page_index < len(writer.pages):
+            raise FormWriteError(str(annotation.get("id")), "Annotation page is outside the PDF")
+        x, y, width, height = annotation["rect"]
+        overlays[page_index].append(({"id": annotation["id"], "field_type": "annotation", "kind": annotation["kind"],
+            "style": annotation.get("style") or {}, "location": {"rect": [x, y, x + width, y + height], "coordinate_system": "normalized-top-left"}}, annotation["text"]))
+        changed = True
     if not changed:
         return original
     for page_index, entries in overlays.items():
@@ -186,15 +241,26 @@ def _write_pdf(original: bytes, fields: list[dict[str, Any]], values: dict[str, 
             field_id = str(field["id"])
             try:
                 x1, y1, x2, y2 = _pdf_rect(field["location"], page)
+                is_check = field.get("kind") == "check"
                 text = "X" if field.get("field_type") == "boolean" and value is True else str(value)
+                style = field.get("style") or {}
+                font = _font_name(style)
                 width = max(0.0, x2 - x1 - 4.0)
                 height = max(0.0, y2 - y1 - 2.0)
-                size = min(11.0, max(6.0, height * 0.72))
-                while size > 6.0 and stringWidth(text, "Helvetica", size) > width:
+                if is_check:
+                    path = drawing.beginPath()
+                    path.moveTo(x1 + width * 0.12, y1 + height * 0.48)
+                    path.lineTo(x1 + width * 0.4, y1 + height * 0.18)
+                    path.lineTo(x1 + width * 0.9, y1 + height * 0.85)
+                    drawing.setLineWidth(max(1.2, min(width, height) * 0.08))
+                    drawing.drawPath(path, stroke=1, fill=0)
+                    continue
+                size = min(float(style.get("size", 11)), max(6.0, height * 0.72))
+                while size > 6.0 and stringWidth(text, font, size) > width:
                     size -= 0.25
-                if stringWidth(text, "Helvetica", size) > width or size > height:
+                if stringWidth(text, font, size) > width or size > height:
                     raise ValueError("value does not fit in field rectangle")
-                drawing.setFont("Helvetica", size)
+                drawing.setFont(font, size)
                 drawing.drawString(x1 + 2, y1 + max(1.0, (y2 - y1 - size) / 2), text)
             except Exception as exc:
                 raise FormWriteError(field_id, f"Could not draw flat PDF field: {exc}") from exc
@@ -331,11 +397,13 @@ def write_form(
     template_schema: dict[str, Any],
     values: dict[str, Any],
     kind: str,
+    annotations: list[dict[str, Any]] | None = None,
+    field_styles: dict[str, dict[str, Any]] | None = None,
 ) -> bytes:
     """Return a filled copy; native failures carry the affected template field ID."""
     fields = list(template_schema.get("fields", []))
     if kind == "pdf":
-        return _write_pdf(original, fields, values)
+        return _write_pdf(original, fields, values, annotations, field_styles)
     if kind == "xlsx":
         return _write_xlsx(original, fields, values)
     raise FormWriteError("", f"Unsupported output type: {kind}")

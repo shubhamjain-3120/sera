@@ -95,6 +95,7 @@ class ModelExecution(Base):
     run_id: Mapped[str | None] = mapped_column(ForeignKey("processing_runs.id"), nullable=True, index=True)
     stage: Mapped[str] = mapped_column(String(64), index=True)
     input_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    input_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     output_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     output_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     provider: Mapped[str] = mapped_column(String(32), default="openai")
