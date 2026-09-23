@@ -232,12 +232,46 @@ class PublishRequest(BaseModel):
     expected_revision: int
 
 
-class FillPlanCreate(BaseModel):
+class FormFillCreate(BaseModel):
     case_key: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
     template_version_id: str
     evidence_snapshot_ids: list[str] | None = None
     agency_key: str | None = None
-    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class FormFieldUpdate(BaseModel):
+    write_value: Any = None
+    evidence_fact_ids: list[str] | None = None
+
+
+class FormFillResponse(BaseModel):
+    id: str
+    case_key: str
+    template_version_id: str
+    evidence_snapshot_ids: list[str]
+    agency_key: str | None = None
+    answers: list[dict[str, Any]]
+    state: str
+    model_execution_id: str | None = None
+    error: str | None = None
+    output_filename: str | None = None
+    output_media_type: str | None = None
+    output_sha256: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    approved_at: datetime | None = None
+    template_name: str = ""
+    target_artifact_id: str = ""
+    target_kind: str = ""
+    status: str = "mapped"
+    output_available: bool = False
+    output_error: str | None = None
+    fields: list[dict[str, Any]] = Field(default_factory=list)
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class FormFillRunResponse(RunResponse):
+    form_fill_id: str
 
 
 class AgencyResponse(BaseModel):
@@ -256,79 +290,4 @@ class CaseResponse(BaseModel):
     case_key: str
     source_count: int
     snapshot_count: int
-    created_at: datetime
-
-
-class DerivationSpec(BaseModel):
-    id: str
-    target_field_id: str
-    operation: Literal["concat", "sum", "subtract", "multiply", "divide", "date_diff_years"]
-    input_ids: list[str] = Field(min_length=1)
-    separator: str = " "
-    as_of_date: str | None = None
-
-
-class FillPlanUpdate(BaseModel):
-    expected_revision: int
-    selected_candidates: dict[str, str | None] = Field(default_factory=dict)
-    derivations: list[DerivationSpec] = Field(default_factory=list)
-
-
-class FillPlanSummary(BaseModel):
-    id: str
-    case_key: str
-    template_version_id: str
-    template_name: str
-    target_artifact_id: str
-    target_kind: str
-    evidence_bundle_id: str
-    evidence_bundle_sha256: str
-    current_revision: int
-    issue_count: int
-    blocker_count: int
-    created_at: datetime
-    updated_at: datetime
-
-
-class FillPlanResponse(FillPlanSummary):
-    revision_id: str
-    mapper_version: str
-    payload_sha256: str
-    payload: dict[str, Any]
-
-
-class ReviewDecisionCreate(BaseModel):
-    expected_revision: int = Field(ge=1)
-    target_field_id: str = Field(min_length=1, max_length=256)
-    action: Literal[
-        "approve",
-        "select_candidate",
-        "edit",
-        "clear",
-        "not_applicable",
-        "intentional_blank",
-        "retain_prefilled",
-        "acknowledge_dependency",
-    ]
-    actor: str = Field(min_length=1, max_length=256)
-    reason: str | None = Field(default=None, max_length=4000)
-    candidate_id: str | None = None
-    value: Any = None
-
-
-class ReviewDecisionResponse(BaseModel):
-    id: str
-    fill_plan_id: str
-    source_revision_id: str
-    source_revision: int
-    resulting_revision_id: str
-    resulting_revision: int
-    target_field_id: str
-    action: str
-    actor: str
-    reason: str | None
-    candidate_id: str | None
-    previous_value: Any = None
-    new_value: Any = None
-    detail: dict[str, Any]
     created_at: datetime

@@ -245,35 +245,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fill-plans": {
+    "/api/v1/form-fills": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List Fill Plans */
-        get: operations["list_fill_plans_api_v1_fill_plans_get"];
+        /** List Form Fills */
+        get: operations["list_form_fills_api_v1_form_fills_get"];
         put?: never;
-        /** Post Fill Plan */
-        post: operations["post_fill_plan_api_v1_fill_plans_post"];
+        /** Post Form Fill */
+        post: operations["post_form_fill_api_v1_form_fills_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fill-plans/{fill_plan_id}": {
+    "/api/v1/form-fills/{fill_id}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get Fill Plan */
-        get: operations["get_fill_plan_api_v1_fill_plans__fill_plan_id__get"];
-        /** Put Fill Plan */
-        put: operations["put_fill_plan_api_v1_fill_plans__fill_plan_id__put"];
+        /** Get Form Fill */
+        get: operations["get_form_fill_api_v1_form_fills__fill_id__get"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -281,18 +280,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/fill-plans/{fill_plan_id}/review-decisions": {
+    "/api/v1/form-fills/{fill_id}/fields/{field_id}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List Review Decisions */
-        get: operations["list_review_decisions_api_v1_fill_plans__fill_plan_id__review_decisions_get"];
+        get?: never;
         put?: never;
-        /** Post Review Decision */
-        post: operations["post_review_decision_api_v1_fill_plans__fill_plan_id__review_decisions_post"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Form Field */
+        patch: operations["patch_form_field_api_v1_form_fills__fill_id__fields__field_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/form-fills/{fill_id}/approve-and-export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve And Export */
+        post: operations["approve_and_export_api_v1_form_fills__fill_id__approve_and_export_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/form-fills/{fill_id}/output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Form Fill Output */
+        get: operations["form_fill_output_api_v1_form_fills__fill_id__output_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -382,27 +414,6 @@ export interface components {
             export_value: string;
             /** Display Value */
             display_value: string;
-        };
-        /** DerivationSpec */
-        DerivationSpec: {
-            /** Id */
-            id: string;
-            /** Target Field Id */
-            target_field_id: string;
-            /**
-             * Operation
-             * @enum {string}
-             */
-            operation: "concat" | "sum" | "subtract" | "multiply" | "divide" | "date_diff_years";
-            /** Input Ids */
-            input_ids: string[];
-            /**
-             * Separator
-             * @default
-             */
-            separator: string;
-            /** As Of Date */
-            as_of_date?: string | null;
         };
         /** DraftResponse */
         DraftResponse: {
@@ -609,8 +620,15 @@ export interface components {
             /** Snapshot Id */
             snapshot_id?: string | null;
         };
-        /** FillPlanCreate */
-        FillPlanCreate: {
+        /** FormFieldUpdate */
+        FormFieldUpdate: {
+            /** Write Value */
+            write_value?: unknown;
+            /** Evidence Fact Ids */
+            evidence_fact_ids?: string[] | null;
+        };
+        /** FormFillCreate */
+        FormFillCreate: {
             /** Case Key */
             case_key: string;
             /** Template Version Id */
@@ -619,78 +637,35 @@ export interface components {
             evidence_snapshot_ids?: string[] | null;
             /** Agency Key */
             agency_key?: string | null;
-            /** Idempotency Key */
-            idempotency_key?: string | null;
         };
-        /** FillPlanResponse */
-        FillPlanResponse: {
+        /** FormFillResponse */
+        FormFillResponse: {
             /** Id */
             id: string;
             /** Case Key */
             case_key: string;
             /** Template Version Id */
             template_version_id: string;
-            /** Template Name */
-            template_name: string;
-            /** Target Artifact Id */
-            target_artifact_id: string;
-            /** Target Kind */
-            target_kind: string;
-            /** Evidence Bundle Id */
-            evidence_bundle_id: string;
-            /** Evidence Bundle Sha256 */
-            evidence_bundle_sha256: string;
-            /** Current Revision */
-            current_revision: number;
-            /** Issue Count */
-            issue_count: number;
-            /** Blocker Count */
-            blocker_count: number;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /** Revision Id */
-            revision_id: string;
-            /** Mapper Version */
-            mapper_version: string;
-            /** Payload Sha256 */
-            payload_sha256: string;
-            /** Payload */
-            payload: {
+            /** Evidence Snapshot Ids */
+            evidence_snapshot_ids: string[];
+            /** Agency Key */
+            agency_key?: string | null;
+            /** Answers */
+            answers: {
                 [key: string]: unknown;
-            };
-        };
-        /** FillPlanSummary */
-        FillPlanSummary: {
-            /** Id */
-            id: string;
-            /** Case Key */
-            case_key: string;
-            /** Template Version Id */
-            template_version_id: string;
-            /** Template Name */
-            template_name: string;
-            /** Target Artifact Id */
-            target_artifact_id: string;
-            /** Target Kind */
-            target_kind: string;
-            /** Evidence Bundle Id */
-            evidence_bundle_id: string;
-            /** Evidence Bundle Sha256 */
-            evidence_bundle_sha256: string;
-            /** Current Revision */
-            current_revision: number;
-            /** Issue Count */
-            issue_count: number;
-            /** Blocker Count */
-            blocker_count: number;
+            }[];
+            /** State */
+            state: string;
+            /** Model Execution Id */
+            model_execution_id?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Output Filename */
+            output_filename?: string | null;
+            /** Output Media Type */
+            output_media_type?: string | null;
+            /** Output Sha256 */
+            output_sha256?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -701,17 +676,79 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /** Approved At */
+            approved_at?: string | null;
+            /**
+             * Template Name
+             * @default
+             */
+            template_name: string;
+            /**
+             * Target Artifact Id
+             * @default
+             */
+            target_artifact_id: string;
+            /**
+             * Target Kind
+             * @default
+             */
+            target_kind: string;
+            /**
+             * Status
+             * @default mapped
+             */
+            status: string;
+            /**
+             * Output Available
+             * @default false
+             */
+            output_available: boolean;
+            /** Output Error */
+            output_error?: string | null;
+            /** Fields */
+            fields?: {
+                [key: string]: unknown;
+            }[];
+            /** Evidence */
+            evidence?: {
+                [key: string]: unknown;
+            }[];
         };
-        /** FillPlanUpdate */
-        FillPlanUpdate: {
-            /** Expected Revision */
-            expected_revision: number;
-            /** Selected Candidates */
-            selected_candidates?: {
-                [key: string]: string | null;
-            };
-            /** Derivations */
-            derivations?: components["schemas"]["DerivationSpec"][];
+        /** FormFillRunResponse */
+        FormFillRunResponse: {
+            /** Id */
+            id: string;
+            /** Artifact Id */
+            artifact_id: string;
+            /** Status */
+            status: string;
+            /** Stage */
+            stage: string;
+            /** Progress */
+            progress: number;
+            /** Provider */
+            provider: string;
+            /** Provider Job Id */
+            provider_job_id: string | null;
+            /** Parser Version */
+            parser_version: string;
+            /** Result */
+            result: {
+                [key: string]: unknown;
+            } | null;
+            /** Error */
+            error: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Form Fill Id */
+            form_fill_id: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -773,64 +810,6 @@ export interface components {
             field_ids?: string[];
             /** Capacity */
             capacity: number;
-        };
-        /** ReviewDecisionCreate */
-        ReviewDecisionCreate: {
-            /** Expected Revision */
-            expected_revision: number;
-            /** Target Field Id */
-            target_field_id: string;
-            /**
-             * Action
-             * @enum {string}
-             */
-            action: "approve" | "select_candidate" | "edit" | "clear" | "not_applicable" | "intentional_blank" | "retain_prefilled" | "acknowledge_dependency";
-            /** Actor */
-            actor: string;
-            /** Reason */
-            reason?: string | null;
-            /** Candidate Id */
-            candidate_id?: string | null;
-            /** Value */
-            value?: unknown;
-        };
-        /** ReviewDecisionResponse */
-        ReviewDecisionResponse: {
-            /** Id */
-            id: string;
-            /** Fill Plan Id */
-            fill_plan_id: string;
-            /** Source Revision Id */
-            source_revision_id: string;
-            /** Source Revision */
-            source_revision: number;
-            /** Resulting Revision Id */
-            resulting_revision_id: string;
-            /** Resulting Revision */
-            resulting_revision: number;
-            /** Target Field Id */
-            target_field_id: string;
-            /** Action */
-            action: string;
-            /** Actor */
-            actor: string;
-            /** Reason */
-            reason: string | null;
-            /** Candidate Id */
-            candidate_id: string | null;
-            /** Previous Value */
-            previous_value?: unknown;
-            /** New Value */
-            new_value?: unknown;
-            /** Detail */
-            detail: {
-                [key: string]: unknown;
-            };
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
         };
         /** RunResponse */
         RunResponse: {
@@ -1528,7 +1507,7 @@ export interface operations {
             };
         };
     };
-    list_fill_plans_api_v1_fill_plans_get: {
+    list_form_fills_api_v1_form_fills_get: {
         parameters: {
             query?: {
                 case_key?: string | null;
@@ -1545,7 +1524,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FillPlanSummary"][];
+                    "application/json": components["schemas"]["FormFillResponse"][];
                 };
             };
             /** @description Validation Error */
@@ -1559,7 +1538,7 @@ export interface operations {
             };
         };
     };
-    post_fill_plan_api_v1_fill_plans_post: {
+    post_form_fill_api_v1_form_fills_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1568,7 +1547,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["FillPlanCreate"];
+                "application/json": components["schemas"]["FormFillCreate"];
             };
         };
         responses: {
@@ -1578,7 +1557,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RunResponse"];
+                    "application/json": components["schemas"]["FormFillRunResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1592,12 +1571,12 @@ export interface operations {
             };
         };
     };
-    get_fill_plan_api_v1_fill_plans__fill_plan_id__get: {
+    get_form_fill_api_v1_form_fills__fill_id__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                fill_plan_id: string;
+                fill_id: string;
             };
             cookie?: never;
         };
@@ -1609,7 +1588,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FillPlanResponse"];
+                    "application/json": components["schemas"]["FormFillResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1623,18 +1602,19 @@ export interface operations {
             };
         };
     };
-    put_fill_plan_api_v1_fill_plans__fill_plan_id__put: {
+    patch_form_field_api_v1_form_fills__fill_id__fields__field_id__patch: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                fill_plan_id: string;
+                fill_id: string;
+                field_id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["FillPlanUpdate"];
+                "application/json": components["schemas"]["FormFieldUpdate"];
             };
         };
         responses: {
@@ -1644,7 +1624,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FillPlanResponse"];
+                    "application/json": components["schemas"]["FormFillResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1658,12 +1638,12 @@ export interface operations {
             };
         };
     };
-    list_review_decisions_api_v1_fill_plans__fill_plan_id__review_decisions_get: {
+    approve_and_export_api_v1_form_fills__fill_id__approve_and_export_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                fill_plan_id: string;
+                fill_id: string;
             };
             cookie?: never;
         };
@@ -1675,7 +1655,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReviewDecisionResponse"][];
+                    "application/json": components["schemas"]["FormFillResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1689,28 +1669,26 @@ export interface operations {
             };
         };
     };
-    post_review_decision_api_v1_fill_plans__fill_plan_id__review_decisions_post: {
+    form_fill_output_api_v1_form_fills__fill_id__output_get: {
         parameters: {
-            query?: never;
+            query?: {
+                preview?: boolean;
+            };
             header?: never;
             path: {
-                fill_plan_id: string;
+                fill_id: string;
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReviewDecisionCreate"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReviewDecisionResponse"];
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

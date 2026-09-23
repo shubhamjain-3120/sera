@@ -121,8 +121,8 @@ button.ghost:hover { background: #0000000a; }
 .value-audit strong,.value-audit code { max-width:65%; overflow-wrap:anywhere; text-align:right; font:10px/1.4 "DM Mono"; }
 .candidate-facts { display:grid; gap:3px; }
 
-.fill-plan-hero:after { content: "03"; }
-.fill-plan-library { padding-bottom: 70px; }
+.form-fill-hero:after { content: "03"; }
+.form-fill-library { padding-bottom: 70px; }
 .mapping-create { width: 100%; text-align: left; cursor: pointer; color: inherit; }
 .mapping-create:disabled { opacity: .6; cursor: wait; }
 .file-icon.mapping { background: #e5ead8; color: #536629; }
@@ -159,6 +159,14 @@ button.ghost:hover { background: #0000000a; }
 .derivation-card { display: grid; gap: 4px; padding: 9px; background: #e8edf0; border-radius: 5px; font: 8px "DM Mono"; color: #53626b; }
 .derivation-card strong { font-size: 10px; }
 .pdf-field span { display: block; max-width: 100%; overflow: hidden; white-space: nowrap; font: 8px/1.2 "DM Sans"; color: #19352a; text-align: left; padding: 1px 2px; }
+.output-preview { width: 100%; min-height: 460px; border: 1px solid var(--line); background: #fff; margin-top: 12px; }
+.evidence-panel { margin: 18px; padding-top: 14px; border-top: 1px solid var(--line); display: grid; gap: 10px; }
+.evidence-panel > div { display: grid; gap: 4px; }
+.fact-use { display: flex; justify-content: space-between; gap: 8px; padding: 6px 8px; border-radius: 4px; background: #f0efe9; font-size: 9px; }
+.fact-use small { font: 8px "DM Mono"; color: #73766e; }
+.fact-use.used { border-left: 3px solid #789268; }
+.fact-use.unused { border-left: 3px solid #c9a75d; }
+.download-link { display: inline-flex; margin: 12px 18px; text-decoration: none; }
 .review-authority { display: grid; gap: 4px; padding: 10px; margin-bottom: 10px; border-radius: 6px; background: #e4eee5; color: #30523a; }
 .review-authority strong { font: 9px "DM Mono"; text-transform: uppercase; }.review-authority span { font-size: 10px; }.review-authority small { font: 8px/1.4 "DM Mono"; }
 .review-authority.exception, .review-authority.needs_acknowledgement { background: #fff0e3; color: #87522e; }

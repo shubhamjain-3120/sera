@@ -1,8 +1,8 @@
-import hashlib
-import json
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +10,7 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.agencies import DETAIL_FACT_KEYS
+from app.agencies import DETAIL_FACT_KEYS, agency_facts
 from app.config import get_settings
 from app.db import Base, SessionLocal, engine, get_db
 from app.inspectors.pdf import render_pdf_page
@@ -20,17 +20,13 @@ from app.models import (
     Artifact,
     ArtifactKind,
     ArtifactPurpose,
-    EvidenceBundle,
     EvidenceSnapshot,
-    FillPlan,
-    FillPlanRevision,
+    FormFill,
     ProcessingRun,
-    ReviewDecision,
-    RunStatus,
     TemplateDraft,
     TemplateVersion,
-    VerificationReport,
 )
+from app.output_writer import FormWriteError, write_form
 from app.schemas import (
     AgencyResponse,
     AgencyUpdate,
@@ -40,29 +36,25 @@ from app.schemas import (
     DraftUpdate,
     EvidenceSnapshotResponse,
     EvidenceSourceResponse,
-    FillPlanCreate,
-    FillPlanResponse,
-    FillPlanSummary,
-    FillPlanUpdate,
+    FormFieldUpdate,
+    FormFillCreate,
+    FormFillResponse,
+    FormFillRunResponse,
     PublishRequest,
-    ReviewDecisionCreate,
-    ReviewDecisionResponse,
     RunResponse,
     VersionResponse,
 )
 from app.services import (
     RevisionConflict,
-    fill_plan_profile_identity,
+    create_form_fill,
     ingest_evidence,
     inspect_artifact,
     new_case_key,
     publish_draft,
-    resolve_agency,
-    review_fill_plan,
-    revise_fill_plan,
-    run_fill_plan_job,
+    run_form_fill_job,
     seed_agencies,
     update_draft,
+    update_form_field,
 )
 from app.storage import get_storage
 
@@ -101,9 +93,9 @@ def ingest_evidence_background(run_id: str) -> None:
         ingest_evidence(session, get_storage(), run_id)
 
 
-def fill_plan_background(run_id: str) -> None:
+def form_fill_background(run_id: str) -> None:
     with SessionLocal() as session:
-        run_fill_plan_job(session, run_id)
+        run_form_fill_job(session, run_id)
 
 
 def _run_response(run: ProcessingRun) -> RunResponse:
@@ -459,256 +451,156 @@ def versions(draft_id: str, db: Db) -> list[TemplateVersion]:
     return list(db.scalars(select(TemplateVersion).where(TemplateVersion.draft_id == draft_id).order_by(TemplateVersion.version.desc())).all())
 
 
-def _fill_plan_response(db: Session, fill_plan: FillPlan) -> FillPlanResponse:
-    version = db.get(TemplateVersion, fill_plan.template_version_id)
-    bundle = db.get(EvidenceBundle, fill_plan.evidence_bundle_id)
-    revision = db.scalar(
-        select(FillPlanRevision).where(
-            FillPlanRevision.fill_plan_id == fill_plan.id,
-            FillPlanRevision.revision == fill_plan.current_revision,
-        )
-    )
-    if version is None or bundle is None or revision is None:
-        raise HTTPException(500, "Fill Plan references are incomplete")
-    draft = db.get(TemplateDraft, version.draft_id)
-    artifact = db.get(Artifact, draft.artifact_id) if draft else None
-    if draft is None or artifact is None:
-        raise HTTPException(500, "Fill Plan target is incomplete")
-    summary = revision.payload.get("summary", {})
-    return FillPlanResponse(
-        id=fill_plan.id,
-        case_key=fill_plan.case_key,
-        template_version_id=version.id,
-        template_name=version.name,
-        target_artifact_id=artifact.id,
-        target_kind=artifact.kind.value,
-        evidence_bundle_id=bundle.id,
-        evidence_bundle_sha256=bundle.bundle_sha256,
-        current_revision=fill_plan.current_revision,
-        issue_count=int(summary.get("issue_count", 0)),
-        blocker_count=int(summary.get("blocker_count", 0)),
-        created_at=fill_plan.created_at,
-        updated_at=fill_plan.updated_at,
-        revision_id=revision.id,
-        mapper_version=revision.mapper_version,
-        payload_sha256=revision.payload_sha256,
-        payload=revision.payload,
-    )
+def _snippet_for_fact(snapshot: dict[str, Any], fact: dict[str, Any], snapshot_id: str) -> list[dict[str, Any]]:
+    snippets = []
+    for provenance in fact.get("provenance", []) or []:
+        excerpt = provenance.get("excerpt")
+        if excerpt:
+            snippets.append({**provenance, "text": excerpt, "snapshot_id": snapshot_id})
+    if snippets:
+        return snippets
+    for block in snapshot.get("parse_blocks", []) or []:
+        block = {"text": block} if isinstance(block, str) else block
+        if str(block.get("id") or block.get("block_id")) in {str(x) for x in fact.get("source_block_ids", [])}:
+            snippets.append({"text": str(block.get("text") or block.get("content") or ""), "snapshot_id": snapshot_id})
+    return snippets
 
 
-@app.post("/api/v1/fill-plans", response_model=RunResponse, status_code=202)
-def post_fill_plan(background: BackgroundTasks, request: FillPlanCreate, db: Db) -> RunResponse:
-    version = db.get(TemplateVersion, request.template_version_id)
-    if version is None:
-        raise HTTPException(404, "Published template version not found")
-    draft = db.get(TemplateDraft, version.draft_id)
-    if draft is None:
-        raise HTTPException(409, "Published template no longer has a draft")
-    latest = db.scalar(
-        select(TemplateVersion)
-        .where(TemplateVersion.draft_id == draft.id)
-        .order_by(TemplateVersion.version.desc())
-        .limit(1)
-    )
-    if latest is None or latest.id != version.id:
-        raise HTTPException(409, "Select the latest published template version")
-    if draft.revision != version.source_revision:
-        raise HTTPException(
-            409,
-            "Template draft has unpublished changes; publish the current draft before creating a Fill Plan",
-        )
-    agency = resolve_agency(db, request.agency_key)
-    profile_hash, _mapping_hash = fill_plan_profile_identity(db, agency.key)
-    material = {
-        "case_key": request.case_key,
-        "template_version_id": version.id,
-        "evidence_snapshot_ids": sorted(request.evidence_snapshot_ids or []),
-        "agency_key": agency.key,
-    }
-    body_hash = hashlib.sha256(
-        json.dumps(material, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-    request_fingerprint = hashlib.sha256(f"{body_hash}:{profile_hash}".encode()).hexdigest()
-    idempotency = request.idempotency_key or f"auto:{request_fingerprint}"
-    target_artifact_id = draft.artifact_id
-    existing_runs = db.scalars(
-        select(ProcessingRun)
-        .where(ProcessingRun.artifact_id == target_artifact_id)
-        .order_by(ProcessingRun.created_at.desc())
-    ).all()
-    for existing in existing_runs:
-        config = existing.config_snapshot or {}
-        if config.get("operation") != "fill_plan" or config.get("idempotency_key") != idempotency:
+def _form_response(db: Session, fill: FormFill) -> FormFillResponse:
+    version = db.get(TemplateVersion, fill.template_version_id)
+    answers = fill.answers or []
+    used = {fid for answer in answers for fid in answer.get("evidence_fact_ids", [])}
+    snapshots = [db.get(EvidenceSnapshot, sid) for sid in fill.evidence_snapshot_ids or []]
+    facts_by_id: dict[str, tuple[dict[str, Any], EvidenceSnapshot]] = {}
+    blocks_by_id: dict[str, dict[str, Any]] = {}
+    raw_blocks: dict[str, list[dict[str, Any]]] = {}
+    for snapshot_row in snapshots:
+        if snapshot_row is None:
             continue
-        if config.get("request_hash") != request_fingerprint:
-            raise HTTPException(409, "Idempotency key was already used with different Fill Plan inputs")
-        # Return an in-flight or completed result unchanged. An implicit key
-        # gets a fresh run after failure, making a user retry straightforward.
-        if existing.status != RunStatus.FAILED or request.idempotency_key:
-            return _run_response(existing)
-        break
-    run = ProcessingRun(
-        artifact_id=target_artifact_id,
-        provider="openai",
-        stage="queued",
-        config_snapshot={
-            "operation": "fill_plan",
-            "request_hash": request_fingerprint,
-            "idempotency_key": idempotency,
-            "mapping_profile_hash": profile_hash,
-            **material,
-            "evidence_snapshot_ids": request.evidence_snapshot_ids,
-        },
-    )
-    db.add(run)
-    db.commit()
-    db.refresh(run)
-    background.add_task(fill_plan_background, run.id)
-    return _run_response(run)
+        for fact in snapshot_row.snapshot.get("facts", []) or []:
+            facts_by_id[str(fact.get("id"))] = (fact, snapshot_row)
+        for index, original in enumerate(snapshot_row.snapshot.get("parse_blocks", []) or []):
+            block = {"text": original} if isinstance(original, str) else original
+            raw_id = str(block.get("id") or block.get("block_id") or index)
+            stored_block = {
+                "text": str(block.get("text") or block.get("content") or ""),
+                "snapshot_id": snapshot_row.id,
+                "artifact_id": snapshot_row.artifact_id,
+                **(block.get("source") or {}),
+            }
+            blocks_by_id[f"{snapshot_row.id}:{raw_id}:{index}"] = stored_block
+            raw_blocks.setdefault(raw_id, []).append(stored_block)
+    agency_row = db.scalar(select(Agency).where(Agency.key == fill.agency_key)) if fill.agency_key else db.scalar(select(Agency).where(Agency.is_default.is_(True)))
+    registry_facts = {fact["id"]: fact for fact in agency_facts({"key": agency_row.key, "name": agency_row.name, "details": agency_row.details})} if agency_row else {}
+    fields = []
+    if version:
+        for field in version.schema.get("fields", []) or []:
+            answer = next((a for a in answers if a.get("field_id") == field.get("id")), None)
+            snippets: list[dict[str, Any]] = []
+            if answer:
+                for fact_id in answer.get("evidence_fact_ids", []) or []:
+                    match = facts_by_id.get(str(fact_id))
+                    if match:
+                        fact, snapshot_row = match
+                        snippets.extend(_snippet_for_fact(snapshot_row.snapshot, fact, snapshot_row.id))
+                    elif str(fact_id) in registry_facts:
+                        fact = registry_facts[str(fact_id)]
+                        snippets.append({"text": f"Agency registry — {fact['label']}: {fact['value']}", "source": "agency_registry"})
+                for block_id in answer.get("source_block_ids", []) or []:
+                    block = blocks_by_id.get(str(block_id))
+                    if block is None and len(raw_blocks.get(str(block_id), [])) == 1:
+                        block = raw_blocks[str(block_id)][0]
+                    if block and block["text"]:
+                        snippets.append(block)
+            fields.append({**(answer or {}), "field": field,
+                           "write_value": (answer or {}).get("write_value", field.get("current_value")),
+                           "origin": (answer or {}).get("origin", "prefilled"),
+                           "snippets": snippets})
+    evidence = []
+    for snapshot_row in snapshots:
+        if not snapshot_row:
+            continue
+        for fact in snapshot_row.snapshot.get("facts", []) or []:
+            evidence.append({"fact": fact, "snapshot_id": snapshot_row.id, "artifact_id": snapshot_row.artifact_id, "used": fact.get("id") in used, "field_ids": [a.get("field_id") for a in answers if fact.get("id") in a.get("evidence_fact_ids", [])]})
+    artifact = db.get(Artifact, version.draft.artifact_id) if version and version.draft else None
+    return FormFillResponse(id=fill.id, case_key=fill.case_key, template_version_id=fill.template_version_id, template_name=version.name if version else "", target_artifact_id=artifact.id if artifact else "", target_kind=artifact.kind.value if artifact else "", status=fill.state, output_available=fill.state == "exported" and bool(fill.output_storage_key), output_error=fill.error, fields=fields, evidence=evidence, answers=answers, evidence_snapshot_ids=fill.evidence_snapshot_ids or [], agency_key=fill.agency_key, state=fill.state, model_execution_id=fill.model_execution_id, error=fill.error, output_filename=fill.output_filename, output_media_type=fill.output_media_type, output_sha256=fill.output_sha256, created_at=fill.created_at, updated_at=fill.updated_at, approved_at=fill.approved_at)
 
 
-@app.get("/api/v1/fill-plans", response_model=list[FillPlanSummary])
-def list_fill_plans(db: Db, case_key: str | None = None) -> list[FillPlanSummary]:
-    query = select(FillPlan)
-    if case_key is not None:
-        query = query.where(FillPlan.case_key == case_key)
-    plans = db.scalars(query.order_by(FillPlan.updated_at.desc())).all()
-    return [FillPlanSummary(**_fill_plan_response(db, plan).model_dump()) for plan in plans]
-
-
-@app.get("/api/v1/fill-plans/{fill_plan_id}", response_model=FillPlanResponse)
-def get_fill_plan(fill_plan_id: str, db: Db) -> FillPlanResponse:
-    fill_plan = db.get(FillPlan, fill_plan_id)
-    if fill_plan is None:
-        raise HTTPException(404, "Fill Plan not found")
-    return _fill_plan_response(db, fill_plan)
-
-
-@app.delete("/api/v1/fill-plans/{fill_plan_id}")
-def delete_fill_plan(fill_plan_id: str, db: Db) -> dict[str, str]:
-    """Delete a Fill Plan and its derived review artifacts.
-
-    ModelExecution rows are deliberately not attached to this deletion tree;
-    they remain the append-only audit trail for model gateway calls.
-    """
-    fill_plan = db.get(FillPlan, fill_plan_id)
-    if fill_plan is None:
-        raise HTTPException(404, "Fill Plan not found")
-
-    revisions = db.scalars(
-        select(FillPlanRevision).where(FillPlanRevision.fill_plan_id == fill_plan_id)
-    ).all()
-    revision_ids = [revision.id for revision in revisions]
-    decisions = db.scalars(
-        select(ReviewDecision).where(ReviewDecision.fill_plan_id == fill_plan_id)
-    ).all()
-    reports = (
-        db.scalars(
-            select(VerificationReport).where(
-                VerificationReport.fill_plan_revision_id.in_(revision_ids)
-            )
-        ).all()
-        if revision_ids
-        else []
-    )
-
-    # Delete dependants explicitly because the schema intentionally does not
-    # cascade immutable revision and audit records.
-    for decision in decisions:
-        db.delete(decision)
-    for report in reports:
-        db.delete(report)
-    for revision in revisions:
-        db.delete(revision)
-    db.delete(fill_plan)
-    db.commit()
-    return {"id": fill_plan_id}
-
-
-@app.put("/api/v1/fill-plans/{fill_plan_id}", response_model=FillPlanResponse)
-def put_fill_plan(fill_plan_id: str, update: FillPlanUpdate, db: Db) -> FillPlanResponse:
-    fill_plan = db.get(FillPlan, fill_plan_id)
-    if fill_plan is None:
-        raise HTTPException(404, "Fill Plan not found")
+@app.post("/api/v1/form-fills", response_model=FormFillRunResponse, status_code=202)
+def post_form_fill(background: BackgroundTasks, request: FormFillCreate, db: Db) -> FormFillRunResponse:
     try:
-        revise_fill_plan(
-            db,
-            fill_plan,
-            update.expected_revision,
-            update.selected_candidates,
-            [item.model_dump(mode="json") for item in update.derivations],
-        )
-    except RevisionConflict as exc:
-        raise HTTPException(409, str(exc)) from exc
+        fill, run = create_form_fill(db, case_key=request.case_key, template_version_id=request.template_version_id, snapshot_ids=request.evidence_snapshot_ids, agency_key=request.agency_key)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return _fill_plan_response(db, fill_plan)
+    background.add_task(form_fill_background, run.id)
+    return FormFillRunResponse(**_run_response(run).model_dump(), form_fill_id=fill.id)
 
 
-def _review_response(db: Session, decision: ReviewDecision) -> ReviewDecisionResponse:
-    source = db.get(FillPlanRevision, decision.source_revision_id)
-    resulting = db.get(FillPlanRevision, decision.resulting_revision_id)
-    if source is None or resulting is None:
-        raise HTTPException(500, "Review decision revision is missing")
-    return ReviewDecisionResponse(
-        id=decision.id,
-        fill_plan_id=decision.fill_plan_id,
-        source_revision_id=decision.source_revision_id,
-        source_revision=source.revision,
-        resulting_revision_id=decision.resulting_revision_id,
-        resulting_revision=resulting.revision,
-        target_field_id=decision.target_field_id,
-        action=decision.action,
-        actor=decision.actor,
-        reason=decision.reason,
-        candidate_id=decision.candidate_id,
-        previous_value=decision.previous_value,
-        new_value=decision.new_value,
-        detail=decision.detail,
-        created_at=decision.created_at,
-    )
+@app.get("/api/v1/form-fills", response_model=list[FormFillResponse])
+def list_form_fills(db: Db, case_key: str | None = None) -> list[FormFillResponse]:
+    query = select(FormFill).order_by(FormFill.updated_at.desc())
+    if case_key:
+        query = query.where(FormFill.case_key == case_key)
+    return [_form_response(db, fill) for fill in db.scalars(query).all()]
 
 
-@app.post(
-    "/api/v1/fill-plans/{fill_plan_id}/review-decisions",
-    response_model=ReviewDecisionResponse,
-    status_code=201,
-)
-def post_review_decision(
-    fill_plan_id: str, request: ReviewDecisionCreate, db: Db
-) -> ReviewDecisionResponse:
-    fill_plan = db.get(FillPlan, fill_plan_id)
-    if fill_plan is None:
-        raise HTTPException(404, "Fill Plan not found")
+@app.get("/api/v1/form-fills/{fill_id}", response_model=FormFillResponse)
+def get_form_fill(fill_id: str, db: Db) -> FormFillResponse:
+    fill = db.get(FormFill, fill_id)
+    if not fill:
+        raise HTTPException(404, "Form fill not found")
+    return _form_response(db, fill)
+
+
+@app.patch("/api/v1/form-fills/{fill_id}/fields/{field_id}", response_model=FormFillResponse)
+def patch_form_field(fill_id: str, field_id: str, request: FormFieldUpdate, db: Db) -> FormFillResponse:
+    fill = db.get(FormFill, fill_id)
+    if not fill:
+        raise HTTPException(404, "Form fill not found")
     try:
-        decision = review_fill_plan(
-            db,
-            fill_plan,
-            expected_revision=request.expected_revision,
-            target_field_id=request.target_field_id,
-            action=request.action,
-            actor=request.actor,
-            reason=request.reason,
-            candidate_id=request.candidate_id,
-            value=request.value,
-        )
-    except RevisionConflict as exc:
-        raise HTTPException(409, str(exc)) from exc
+        return _form_response(db, update_form_field(db, fill, field_id, request.write_value, request.evidence_fact_ids))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return _review_response(db, decision)
 
 
-@app.get(
-    "/api/v1/fill-plans/{fill_plan_id}/review-decisions",
-    response_model=list[ReviewDecisionResponse],
-)
-def list_review_decisions(fill_plan_id: str, db: Db) -> list[ReviewDecisionResponse]:
-    if db.get(FillPlan, fill_plan_id) is None:
-        raise HTTPException(404, "Fill Plan not found")
-    decisions = db.scalars(
-        select(ReviewDecision)
-        .where(ReviewDecision.fill_plan_id == fill_plan_id)
-        .order_by(ReviewDecision.created_at.desc())
-    ).all()
-    return [_review_response(db, decision) for decision in decisions]
+@app.post("/api/v1/form-fills/{fill_id}/approve-and-export", response_model=FormFillResponse)
+def approve_and_export(fill_id: str, db: Db) -> FormFillResponse:
+    fill = db.get(FormFill, fill_id)
+    if fill and fill.state in {"mapping", "mapping_failed"}:
+        raise HTTPException(409, "Mapping must finish before approval")
+    version = db.get(TemplateVersion, fill.template_version_id) if fill else None
+    draft = db.get(TemplateDraft, version.draft_id) if version else None
+    artifact = db.get(Artifact, draft.artifact_id) if draft else None
+    if not fill or not version or not artifact:
+        raise HTTPException(404, "Form fill not found")
+    values = {field.get("id"): field.get("current_value") for field in version.schema.get("fields", []) or []}
+    values.update({answer.get("field_id"): answer.get("write_value") for answer in fill.answers or []})
+    try:
+        with get_storage().open(artifact.storage_key) as source:
+            output = write_form(source.read(), version.schema, values, artifact.kind.value)
+    except FormWriteError as exc:
+        fill.state = "export_failed"
+        fill.error = f"{exc.field_id}: {exc.message}"
+        db.commit()
+        raise HTTPException(422, detail={"field_id": exc.field_id, "error": exc.message}) from exc
+    suffix = ".pdf" if artifact.kind == ArtifactKind.PDF else ".xlsx"
+    key, sha256, _ = get_storage().put_immutable(BytesIO(output), suffix)
+    fill.output_storage_key = key
+    fill.output_sha256 = sha256
+    fill.output_filename = f"{Path(artifact.filename).stem}_filled{suffix}"
+    fill.output_media_type = artifact.media_type
+    fill.state = "exported"
+    fill.error = None
+    fill.approved_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(fill)
+    return _form_response(db, fill)
+
+
+@app.get("/api/v1/form-fills/{fill_id}/output")
+def form_fill_output(fill_id: str, db: Db, preview: bool = False) -> StreamingResponse:
+    fill = db.get(FormFill, fill_id)
+    if not fill or fill.state != "exported" or not fill.output_storage_key:
+        raise HTTPException(404, "Current form output is not available")
+    disposition = "inline" if preview else "attachment"
+    return StreamingResponse(get_storage().open(fill.output_storage_key), media_type=fill.output_media_type, headers={"Content-Disposition": f'{disposition}; filename="{fill.output_filename}"'})

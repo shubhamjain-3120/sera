@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import time
@@ -8,42 +10,25 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.agencies import AGENCY_SOURCE_VERSION, SEED_AGENCIES, agency_facts
+from app.agencies import SEED_AGENCIES, agency_facts
 from app.config import get_settings
 from app.evidence import extract_evidence, extract_evidence_model, native_parse
-from app.evidence.retrieve import candidate_pools
 from app.inspectors import inspect_pdf, inspect_xlsx
-from app.mapping import (
-    AGENCY_SNAPSHOT_ID,
-    MAPPER_VERSION,
-    MAPPING_PROMPT_VERSION,
-    MAPPING_SCHEMA_VERSION,
-    MODEL_MAPPER_VERSION,
-    apply_revision,
-    build_fill_plan,
-    build_model_fill_plan,
-    mapping_profile_hash,
-)
+from app.mapping import map_form
 from app.model_gateway import ModelGateway
 from app.models import (
     Agency,
     Artifact,
-    EvidenceBundle,
     EvidenceSnapshot,
-    FillPlan,
-    FillPlanRevision,
+    FormFill,
     ProcessingRun,
-    ReviewDecision,
     RunStatus,
     TemplateDraft,
     TemplateVersion,
-    new_id,
 )
 from app.parsers.reducto import ReductoParserAdapter
-from app.review import apply_review_decision
 from app.schemas import TemplateSchema
 from app.storage import ObjectStorage
-from app.verification import deterministic_validate
 
 
 class RevisionConflict(Exception):
@@ -322,39 +307,9 @@ def resolve_agency(session: Session, agency_key: str | None) -> Agency:
     return agency
 
 
-def fill_plan_profile_identity(
-    session: Session, agency_key: str | None, gateway: ModelGateway | None = None
-) -> tuple[str, str]:
-    """Return immutable plan profile and mapper profile hashes."""
-    settings = gateway.settings if gateway is not None else get_settings()
-    agency = resolve_agency(session, agency_key)
-    facts = agency_facts({"key": agency.key, "name": agency.name, "details": agency.details})
-    agency_rows = [
-        {**fact, "snapshot_id": AGENCY_SNAPSHOT_ID, "source_kind": "agency"}
-        for fact in facts
-    ]
-    agency_hash = hashlib.sha256(
-        json.dumps(agency_rows, sort_keys=True, separators=(",", ":"), default=str).encode()
-    ).hexdigest()
-    mapping_hash = mapping_profile_hash(
-        model=settings.openai_mapping_model,
-        reasoning_effort=settings.openai_reasoning_effort,
-        prompt_version=MAPPING_PROMPT_VERSION,
-        schema_version=MAPPING_SCHEMA_VERSION,
-        mapper_version=MODEL_MAPPER_VERSION,
-        agency_facts_hash=agency_hash,
-    )
-    return mapping_hash, mapping_hash
-
-
 def new_case_key(session: Session) -> str:
-    """Derive a case identifier for one upload batch, keeping sources isolated."""
     stamp = datetime.now(UTC).strftime("%Y%m%d")
-    existing = set(
-        session.scalars(
-            select(Artifact.case_key).where(Artifact.case_key.like(f"case-{stamp}-%"))
-        ).all()
-    )
+    existing = set(session.scalars(select(Artifact.case_key).where(Artifact.case_key.like(f"case-{stamp}-%"))).all())
     for sequence in range(1, 1000):
         candidate = f"case-{stamp}-{sequence:03d}"
         if candidate not in existing:
@@ -362,296 +317,96 @@ def new_case_key(session: Session) -> str:
     raise ValueError(f"Exhausted case identifiers for {stamp}")
 
 
-def create_fill_plan(
-    session: Session,
-    case_key: str,
-    template_version: TemplateVersion,
-    snapshot_ids: list[str] | None = None,
-    agency_key: str | None = None,
-) -> FillPlan:
-    agency = resolve_agency(session, agency_key)
-    if snapshot_ids is None:
+def resolve_form_snapshots(session: Session, case_key: str, snapshot_ids: list[str] | None) -> list[EvidenceSnapshot]:
+    """Resolve an immutable, case-isolated snapshot list for a form fill."""
+    if snapshot_ids is not None:
+        snapshots = list(session.scalars(select(EvidenceSnapshot).where(EvidenceSnapshot.id.in_(snapshot_ids))).all())
+        if len(snapshots) != len(set(snapshot_ids)):
+            raise ValueError("One or more evidence snapshots were not found")
+    else:
         rows = session.execute(
             select(EvidenceSnapshot, Artifact)
             .join(Artifact, EvidenceSnapshot.artifact_id == Artifact.id)
             .where(Artifact.case_key == case_key)
             .order_by(EvidenceSnapshot.created_at.desc(), EvidenceSnapshot.id.desc())
         ).all()
-        # A case bundle contains one current immutable snapshot per source artifact.
-        # Older parser/extractor snapshots remain addressable but are never mixed
-        # into a new Fill Plan implicitly.
-        latest_by_artifact: dict[str, EvidenceSnapshot] = {}
+        latest: dict[str, EvidenceSnapshot] = {}
         for snapshot, artifact in rows:
-            latest_by_artifact.setdefault(artifact.id, snapshot)
-        snapshots = list(latest_by_artifact.values())
-    else:
-        snapshots = list(
-            session.scalars(select(EvidenceSnapshot).where(EvidenceSnapshot.id.in_(snapshot_ids))).all()
-        )
-        if len(snapshots) != len(set(snapshot_ids)):
-            raise ValueError("One or more evidence snapshots were not found")
-        artifacts = list(
-            session.scalars(
-                select(Artifact).where(Artifact.id.in_([snapshot.artifact_id for snapshot in snapshots]))
-            ).all()
-        )
-        if any(artifact.case_key != case_key for artifact in artifacts):
-            raise ValueError("Evidence snapshots must all belong to the requested case")
+            latest.setdefault(artifact.id, snapshot)
+        snapshots = list(latest.values())
     if not snapshots:
         raise ValueError(f"Case {case_key} has no evidence snapshots")
-    ordered = sorted(snapshots, key=lambda item: item.id)
-    bundle_material = [
-        {"id": snapshot.id, "sha256": snapshot.snapshot_sha256} for snapshot in ordered
-    ]
-    bundle_hash = hashlib.sha256(
-        json.dumps(bundle_material, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-    bundle = session.scalar(
-        select(EvidenceBundle).where(
-            EvidenceBundle.case_key == case_key, EvidenceBundle.bundle_sha256 == bundle_hash
-        )
-    )
-    if bundle is None:
-        bundle = EvidenceBundle(
-            case_key=case_key,
-            snapshot_ids=[snapshot.id for snapshot in ordered],
-            bundle_sha256=bundle_hash,
-        )
-        session.add(bundle)
-        session.flush()
-    existing = session.scalar(
-        select(FillPlan).where(
-            FillPlan.template_version_id == template_version.id,
-            FillPlan.evidence_bundle_id == bundle.id,
-            FillPlan.agency_key == agency.key,
-        )
-    )
-    if existing:
-        return existing
-    payload = build_fill_plan(
-        template_version.schema,
-        [(snapshot.id, snapshot.snapshot) for snapshot in ordered],
-        candidate_pools(session, ordered, template_version.schema.get("fields", [])),
-        agency_facts({"key": agency.key, "name": agency.name, "details": agency.details}),
-    )
-    payload["evidence_bundle"] = {
-        "id": bundle.id,
-        "case_key": case_key,
-        "snapshot_ids": bundle.snapshot_ids,
-        "sha256": bundle.bundle_sha256,
-    }
-    payload["template_version"] = {
-        "id": template_version.id,
-        "version": template_version.version,
-        "schema_sha256": template_version.schema_sha256,
-    }
-    payload["agency"] = {
-        "key": agency.key,
-        "name": agency.name,
-        "source_version": AGENCY_SOURCE_VERSION,
-    }
-    fill_plan = FillPlan(
-        case_key=case_key,
-        agency_key=agency.key,
-        template_version_id=template_version.id,
-        evidence_bundle_id=bundle.id,
-    )
-    session.add(fill_plan)
+    artifacts = {artifact.id: artifact for artifact in session.scalars(
+        select(Artifact).where(Artifact.id.in_([s.artifact_id for s in snapshots]))
+    ).all()}
+    if any(artifacts.get(snapshot.artifact_id) is None or artifacts[snapshot.artifact_id].case_key != case_key for snapshot in snapshots):
+        raise ValueError("Evidence snapshots must all belong to the requested case")
+    return sorted(snapshots, key=lambda item: item.id)
+
+
+def create_form_fill(session: Session, *, case_key: str, template_version_id: str,
+                     snapshot_ids: list[str] | None, agency_key: str | None) -> tuple[FormFill, ProcessingRun]:
+    version = session.get(TemplateVersion, template_version_id)
+    if version is None:
+        raise ValueError("Published template version not found")
+    snapshots = resolve_form_snapshots(session, case_key, snapshot_ids)
+    fill = FormFill(case_key=case_key, template_version_id=template_version_id,
+                    evidence_snapshot_ids=[s.id for s in snapshots], agency_key=agency_key,
+                    answers=[], state="mapping")
+    session.add(fill)
     session.flush()
-    revision = _fill_plan_revision(fill_plan.id, 1, payload)
-    session.add(revision)
+    run = ProcessingRun(
+        artifact_id=version.draft.artifact_id,
+        provider="openai", stage="queued",
+        config_snapshot={"operation": "form_fill", "form_fill_id": fill.id,
+                         "case_key": case_key, "template_version_id": template_version_id,
+                         "evidence_snapshot_ids": fill.evidence_snapshot_ids,
+                         "agency_key": agency_key},
+    )
+    session.add(run)
     session.commit()
-    session.refresh(fill_plan)
-    return fill_plan
+    session.refresh(fill)
+    session.refresh(run)
+    return fill, run
 
 
-def create_model_fill_plan(
-    session: Session,
-    *,
-    run_id: str,
-    case_key: str,
-    template_version: TemplateVersion,
-    snapshot_ids: list[str] | None = None,
-    agency_key: str | None = None,
-    gateway: ModelGateway | None = None,
-) -> FillPlan:
-    """Create a mapped plan in one transaction using frozen evidence snapshots.
-
-    Model execution traces are stored independently by ModelGateway; the
-    evidence bundle and Fill Plan revision commit after mapping succeeds.
-    """
-    gateway = gateway or ModelGateway()
-    agency = resolve_agency(session, agency_key)
-    snapshots = _resolve_fill_plan_snapshots(session, case_key, snapshot_ids)
-    ordered = sorted(snapshots, key=lambda item: item.id)
-    bundle_material = [{"id": item.id, "sha256": item.snapshot_sha256} for item in ordered]
-    bundle_hash = hashlib.sha256(
-        json.dumps(bundle_material, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-    bundle = session.scalar(
-        select(EvidenceBundle).where(
-            EvidenceBundle.case_key == case_key,
-            EvidenceBundle.bundle_sha256 == bundle_hash,
-        )
-    )
-    if bundle is None:
-        bundle = EvidenceBundle(
-            id=new_id(),
-            case_key=case_key,
-            snapshot_ids=[item.id for item in ordered],
-            bundle_sha256=bundle_hash,
-        )
-
-    agency_payload = agency_facts(
-        {"key": agency.key, "name": agency.name, "details": agency.details}
-    )
-    profile_hash, mapping_hash = fill_plan_profile_identity(session, agency.key, gateway)
-    model = gateway.model_for("mapping")
-    existing = session.scalar(
-        select(FillPlan).where(
-            FillPlan.template_version_id == template_version.id,
-            FillPlan.evidence_bundle_id == bundle.id,
-            FillPlan.agency_key == agency.key,
-            FillPlan.mapping_profile_hash == profile_hash,
-        )
-    )
-    if existing:
-        return existing
-
-    payload = build_model_fill_plan(
-        template_version.schema,
-        [(item.id, {**item.snapshot, "_artifact_id": item.artifact_id}) for item in ordered],
-        agency_payload,
-        session=session,
-        run_id=run_id,
-        gateway=gateway,
-    )
-    if payload.get("mapping_profile_hash") != mapping_hash:
-        raise RuntimeError("Mapping profile hash differs from the persisted Fill Plan profile identity")
-    payload["evidence_bundle"] = {
-        "id": bundle.id, "case_key": case_key,
-        "snapshot_ids": bundle.snapshot_ids, "sha256": bundle.bundle_sha256,
-    }
-    payload["template_version"] = {
-        "id": template_version.id, "version": template_version.version,
-        "schema_sha256": template_version.schema_sha256,
-    }
-    payload["agency"] = {"key": agency.key, "name": agency.name, "source_version": AGENCY_SOURCE_VERSION}
-    payload["processing_run_id"] = run_id
-    payload["model_profile"] = {
-        **payload.get("model_profile", {}), "mapping_profile_hash": mapping_hash,
-        "profile_hash": profile_hash, "mapping_model": model,
-        "mapping_prompt_version": MAPPING_PROMPT_VERSION,
-        "mapping_schema_version": MAPPING_SCHEMA_VERSION,
-        "mapper_version": MODEL_MAPPER_VERSION,
-    }
-    validation = deterministic_validate(payload)
-    payload["validation"] = validation
-    known = {(item.get("target_id"), item["code"]) for item in payload.get("issues", [])}
-    already_required = {target_id for target_id, code in known if code == "required_field_blank"}
-    for finding in validation["findings"]:
-        if finding["code"] == "required_value_missing" and finding.get("target_id") in already_required:
-            continue
-        key = (finding.get("target_id"), finding["code"])
-        if key not in known:
-            payload.setdefault("issues", []).append({
-                "id": finding["id"], "code": finding["code"],
-                "severity": finding["severity"], "target_id": finding.get("target_id"),
-                "message": finding["message"],
-            })
-            known.add(key)
-    payload["summary"] = {
-        "target_count": len(payload.get("targets", [])),
-        "proposed_count": sum(target.get("selected_candidate_id") is not None for target in payload.get("targets", [])),
-        "unresolved_count": sum(target.get("state") == "unresolved" for target in payload.get("targets", [])),
-        "issue_count": len(payload.get("issues", [])),
-        "blocker_count": sum(issue.get("severity") == "blocker" for issue in payload.get("issues", [])),
-    }
-
-    fill_plan = FillPlan(
-        case_key=case_key, agency_key=agency.key,
-        template_version_id=template_version.id,
-        evidence_bundle_id=bundle.id, mapping_profile_hash=profile_hash,
-    )
-    if session.get(EvidenceBundle, bundle.id) is None:
-        session.add(bundle)
-    session.add(fill_plan)
-    session.flush()
-    session.add(_fill_plan_revision(fill_plan.id, 1, payload))
-    return fill_plan
-
-
-def _resolve_fill_plan_snapshots(
-    session: Session, case_key: str, snapshot_ids: list[str] | None
-) -> list[EvidenceSnapshot]:
-    if snapshot_ids is None:
-        rows = session.execute(
-            select(EvidenceSnapshot, Artifact)
-            .join(Artifact, EvidenceSnapshot.artifact_id == Artifact.id)
-            .where(Artifact.case_key == case_key)
-            .order_by(EvidenceSnapshot.created_at.desc(), EvidenceSnapshot.id.desc())
-        ).all()
-        latest_by_artifact: dict[str, EvidenceSnapshot] = {}
-        for snapshot, artifact in rows:
-            latest_by_artifact.setdefault(artifact.id, snapshot)
-        snapshots = list(latest_by_artifact.values())
-    else:
-        snapshots = list(
-            session.scalars(
-                select(EvidenceSnapshot).where(EvidenceSnapshot.id.in_(snapshot_ids))
-            ).all()
-        )
-        if len(snapshots) != len(set(snapshot_ids)):
-            raise ValueError("One or more evidence snapshots were not found")
-        artifacts = list(
-            session.scalars(
-                select(Artifact).where(
-                    Artifact.id.in_([item.artifact_id for item in snapshots])
-                )
-            ).all()
-        )
-        if len(artifacts) != len(snapshots) or any(
-            artifact.case_key != case_key for artifact in artifacts
-        ):
-            raise ValueError("Evidence snapshots must all belong to the requested case")
-    if not snapshots:
-        raise ValueError(f"Case {case_key} has no evidence snapshots")
-    return snapshots
-
-
-def run_fill_plan_job(session: Session, run_id: str, gateway: ModelGateway | None = None) -> None:
-    """Execute one queued Fill Plan run and atomically publish its artifacts."""
+def run_form_fill_job(session: Session, run_id: str, gateway: ModelGateway | None = None) -> None:
     run = session.get(ProcessingRun, run_id)
     if run is None:
         raise KeyError(run_id)
     config = dict(run.config_snapshot or {})
-    if config.get("operation") != "fill_plan":
-        raise ValueError("Processing run is not a Fill Plan operation")
+    fill = session.get(FormFill, config.get("form_fill_id"))
+    if fill is None:
+        raise ValueError("Form fill no longer exists")
     run.status = RunStatus.RUNNING
     run.stage = "mapping"
-    run.progress = 15
+    run.progress = 20
     run.started_at = datetime.now(UTC)
-    run.error = None
     session.commit()
     try:
-        version = session.get(TemplateVersion, config["template_version_id"])
-        if version is None:
-            raise ValueError("Published template version no longer exists")
-        run.stage = "mapping"
-        run.progress = 20
-        session.commit()
-        plan = create_model_fill_plan(
-            session,
-            run_id=run.id,
-            case_key=config["case_key"],
-            template_version=version,
-            snapshot_ids=config.get("evidence_snapshot_ids"),
-            agency_key=config.get("agency_key"),
-            gateway=gateway,
-        )
-        run.stage = "complete"
-        run.progress = 95
-        run.result = {"fill_plan_id": plan.id}
+        version = session.get(TemplateVersion, fill.template_version_id)
+        snapshots = [session.get(EvidenceSnapshot, sid) for sid in fill.evidence_snapshot_ids]
+        if version is None or any(item is None for item in snapshots):
+            raise ValueError("Form fill references are incomplete")
+        agency = resolve_agency(session, fill.agency_key)
+        result = map_form(version.schema,
+                          [(item.id, {**item.snapshot, "_artifact_id": item.artifact_id}) for item in snapshots if item],
+                          agency_facts({"key": agency.key, "name": agency.name, "details": agency.details}),
+                          session=session, run_id=run.id, gateway=gateway)
+        mappable = {
+            str(field.get("id")) for field in version.schema.get("fields", [])
+            if field.get("writable") is not False
+            and field.get("field_type") not in {"action", "signature"}
+            and (field.get("current_value") is None or not str(field["current_value"]).strip())
+        }
+        fill.answers = [
+            dict(answer, origin="model") for answer in result.get("answers", [])
+            if answer.get("field_id") in mappable
+        ]
+        fill.model_execution_id = (result.get("model_profile") or {}).get("execution_id")
+        fill.state = "mapped"
+        fill.error = None
+        run.result = {"form_fill_id": fill.id}
         run.status = RunStatus.SUCCEEDED
         run.stage = "complete"
         run.progress = 100
@@ -660,124 +415,38 @@ def run_fill_plan_job(session: Session, run_id: str, gateway: ModelGateway | Non
     except Exception as exc:
         session.rollback()
         failed = session.get(ProcessingRun, run_id)
-        if failed is not None:
+        current = session.get(FormFill, config.get("form_fill_id"))
+        if failed:
             failed.status = RunStatus.FAILED
             failed.stage = "failed"
             failed.error = f"{type(exc).__name__}: {exc}"
-            failed.result = None
             failed.finished_at = datetime.now(UTC)
-            session.commit()
-        # Keep the failure visible in GET /processing-runs, rather than
-        # bubbling into BackgroundTasks and obscuring the committed run state.
+        if current:
+            current.state = "mapping_failed"
+            current.error = f"{type(exc).__name__}: {exc}"
+        session.commit()
 
 
-def revise_fill_plan(
-    session: Session,
-    fill_plan: FillPlan,
-    expected_revision: int,
-    selected_candidates: dict[str, str | None],
-    derivations: list[dict[str, object]],
-) -> FillPlanRevision:
-    if fill_plan.current_revision != expected_revision:
-        raise RevisionConflict(
-            f"Expected revision {expected_revision}, current revision is {fill_plan.current_revision}"
-        )
-    current = session.scalar(
-        select(FillPlanRevision).where(
-            FillPlanRevision.fill_plan_id == fill_plan.id,
-            FillPlanRevision.revision == fill_plan.current_revision,
-        )
-    )
-    if current is None:
-        raise ValueError("Current Fill Plan revision is missing")
-    human_targets = {
-        target.get("field", {}).get("id")
-        for target in current.payload.get("targets", [])
-        if target.get("review", {}).get("origin") == "human"
-    }
-    attempted = human_targets.intersection(selected_candidates)
-    if attempted:
-        raise ValueError(
-            "Human-reviewed targets have terminal authority and cannot be changed by mapping: "
-            + ", ".join(sorted(attempted))
-        )
-    payload = apply_revision(current.payload, selected_candidates, derivations)
-    next_number = fill_plan.current_revision + 1
-    revision = _fill_plan_revision(fill_plan.id, next_number, payload)
-    session.add(revision)
-    fill_plan.current_revision = next_number
+def update_form_field(session: Session, fill: FormFill, field_id: str, write_value: object,
+                      evidence_fact_ids: list[str] | None = None) -> FormFill:
+    if fill.state in {"mapping", "mapping_failed"}:
+        raise ValueError("Mapping must finish before review edits")
+    version = session.get(TemplateVersion, fill.template_version_id)
+    field = next((item for item in version.schema.get("fields", []) if item.get("id") == field_id), None) if version else None
+    if field is None:
+        raise ValueError("Template field was not found")
+    if field.get("writable") is False or field.get("field_type") in {"action", "signature"}:
+        raise ValueError("Template field is not writable")
+    answers = [dict(answer) for answer in (fill.answers or []) if answer.get("field_id") != field_id]
+    answer = {"field_id": field_id, "write_value": write_value, "origin": "human"}
+    if evidence_fact_ids is not None:
+        answer["evidence_fact_ids"] = evidence_fact_ids
+    answers.append(answer)
+    fill.answers = answers
+    fill.state = "mapped"
+    fill.error = None
+    fill.output_storage_key = fill.output_filename = fill.output_media_type = fill.output_sha256 = None
+    fill.approved_at = None
     session.commit()
-    session.refresh(revision)
-    return revision
-
-
-def review_fill_plan(
-    session: Session,
-    fill_plan: FillPlan,
-    *,
-    expected_revision: int,
-    target_field_id: str,
-    action: str,
-    actor: str,
-    reason: str | None,
-    candidate_id: str | None,
-    value: object,
-) -> ReviewDecision:
-    if fill_plan.current_revision != expected_revision:
-        raise RevisionConflict(
-            f"Expected revision {expected_revision}, current revision is {fill_plan.current_revision}"
-        )
-    current = session.scalar(
-        select(FillPlanRevision).where(
-            FillPlanRevision.fill_plan_id == fill_plan.id,
-            FillPlanRevision.revision == expected_revision,
-        )
-    )
-    if current is None:
-        raise ValueError("Current Fill Plan revision is missing")
-    decision = ReviewDecision(
-        id=new_id(),
-        fill_plan_id=fill_plan.id,
-        source_revision_id=current.id,
-        resulting_revision_id="",
-        target_field_id=target_field_id,
-        action=action,
-        actor=actor,
-        reason=reason,
-    )
-    payload, audit = apply_review_decision(
-        current.payload,
-        decision_id=decision.id,
-        target_field_id=target_field_id,
-        action=action,
-        actor=actor,
-        reason=reason,
-        candidate_id=candidate_id,
-        value=value,
-    )
-    next_number = expected_revision + 1
-    revision = _fill_plan_revision(fill_plan.id, next_number, payload)
-    revision.mapper_version = f"{current.mapper_version}+human-review-v1"
-    session.add(revision)
-    session.flush()
-    decision.resulting_revision_id = revision.id
-    decision.candidate_id = audit["candidate_id"]
-    decision.previous_value = audit["previous_value"]
-    decision.new_value = audit["new_value"]
-    decision.detail = audit["detail"]
-    session.add(decision)
-    fill_plan.current_revision = next_number
-    session.commit()
-    session.refresh(decision)
-    return decision
-
-
-def _fill_plan_revision(fill_plan_id: str, revision: int, payload: dict) -> FillPlanRevision:
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
-    return FillPlanRevision(
-        fill_plan_id=fill_plan_id,
-        revision=revision,
-        mapper_version=payload.get("mapper_version", MAPPER_VERSION),
-        payload_sha256=hashlib.sha256(canonical).hexdigest(),
-        payload=payload,
-    )
+    session.refresh(fill)
+    return fill

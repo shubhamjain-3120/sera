@@ -3,27 +3,12 @@ from sqlalchemy.orm import Session
 
 from app.agencies import DEFAULT_AGENCY_KEY, agency_facts
 from app.db import Base
-from app.mapping import build_fill_plan
 from app.models import Agency, Artifact, ArtifactKind, ArtifactPurpose
 from app.services import new_case_key, resolve_agency, seed_agencies
-from app.verification import deterministic_validate
-from tests.test_fill_plans import fact, field
 
 
 def agency(**details: str) -> dict:
     return {"key": "js-truck", "name": "JS Truck Insurance", "details": details}
-
-
-def target(payload: dict, field_id: str) -> dict:
-    return next(item for item in payload["targets"] if item["field"]["id"] == field_id)
-
-
-def selected(payload: dict, field_id: str) -> dict | None:
-    item = target(payload, field_id)
-    return next(
-        (candidate for candidate in item["candidates"] if candidate["id"] == item["selected_candidate_id"]),
-        None,
-    )
 
 
 def test_seeding_is_idempotent_and_keeps_edited_details():
@@ -71,36 +56,3 @@ def test_blank_details_do_not_become_facts():
     assert [item["key"] for item in facts] == ["agency.legal_name"]
     assert facts[0]["entity_role"] == "agency"
     assert facts[0]["provenance"][0]["kind"] == "agency_registry"
-
-
-def test_agency_details_fill_agency_fields_without_touching_applicant_fields():
-    payload = build_fill_plan(
-        {
-            "fields": [
-                field("agency-phone", "agency.phone"),
-                field("applicant-phone", "applicant.phone"),
-            ]
-        },
-        [("snap-1", {"facts": [fact("f-1", "applicant.phone", "555-0199")]})],
-        None,
-        agency_facts(agency(phone="555-0100")),
-    )
-
-    agency_pick = selected(payload, "agency-phone")
-    applicant_pick = selected(payload, "applicant-phone")
-    assert agency_pick["value"] == "555-0100"
-    assert agency_pick["origin"] == "agency"
-    # The applicant's own number must never be displaced by the filing agency's.
-    assert applicant_pick["value"] == "555-0199"
-    assert applicant_pick["origin"] == "evidence"
-    assert deterministic_validate(payload)["status"] == "pass"
-
-
-def test_agency_facts_are_not_offered_to_unrelated_targets():
-    payload = build_fill_plan(
-        {"fields": [field("driver-license", "driver.license_number")]},
-        [("snap-1", {"facts": []})],
-        None,
-        agency_facts(agency(license_number="AG-4471")),
-    )
-    assert target(payload, "driver-license")["candidates"] == []

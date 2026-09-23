@@ -1,4 +1,4 @@
-import type { Agency, Artifact, CaseSummary, Draft, EvidenceSnapshot, EvidenceSource, FillPlan, FillPlanSummary, ReviewAction, ReviewDecision, Run, TemplateSchema, TemplateVersion } from "./types";
+import type { Agency, Artifact, CaseSummary, Draft, EvidenceSnapshot, EvidenceSource, FormFill, FormFillSummary, Run, TemplateSchema, TemplateVersion } from "./types";
 
 export const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -6,7 +6,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API}${path}`, init);
   if (!response.ok) {
     const detail = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(detail.detail ?? "Request failed");
+    const message = detail.detail;
+    if (message && typeof message === "object" && "field_id" in message && "error" in message) {
+      throw new Error(`${message.field_id}: ${message.error}`);
+    }
+    throw new Error(typeof message === "string" ? message : "Request failed");
   }
   return response.json() as Promise<T>;
 }
@@ -41,11 +45,10 @@ export const api = {
       body: JSON.stringify({ expected_revision: revision }),
     }),
   versions: (draftId: string) => request<TemplateVersion[]>(`/api/v1/templates/${draftId}/versions`),
-  listFillPlans: () => request<FillPlanSummary[]>("/api/v1/fill-plans"),
-  fillPlan: (id: string) => request<FillPlan>(`/api/v1/fill-plans/${id}`),
-  deleteFillPlan: (id: string) => request<{ id: string }>(`/api/v1/fill-plans/${id}`, { method: "DELETE" }),
-  createFillPlan: (caseKey: string, templateVersionId: string, agencyKey: string) =>
-    request<Run>("/api/v1/fill-plans", {
+  listFormFills: () => request<FormFillSummary[]>("/api/v1/form-fills"),
+  formFill: (id: string) => request<FormFill>(`/api/v1/form-fills/${id}`),
+  createFormFill: (caseKey: string, templateVersionId: string, agencyKey: string) =>
+    request<Run>("/api/v1/form-fills", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ case_key: caseKey, template_version_id: templateVersionId, agency_key: agencyKey }),
@@ -58,13 +61,14 @@ export const api = {
       body: JSON.stringify({ details }),
     }),
   listCases: () => request<CaseSummary[]>("/api/v1/cases"),
-  listReviewDecisions: (fillPlanId: string) => request<ReviewDecision[]>(`/api/v1/fill-plans/${fillPlanId}/review-decisions`),
-  reviewFillPlan: (fillPlanId: string, input: { expected_revision: number; target_field_id: string; action: ReviewAction; actor: string; reason?: string; candidate_id?: string; value?: unknown }) =>
-    request<ReviewDecision>(`/api/v1/fill-plans/${fillPlanId}/review-decisions`, {
-      method: "POST",
+  updateFormFillField: (id: string, fieldId: string, input: { write_value: unknown; evidence_fact_ids?: string[] }) =>
+    request<FormFill>(`/api/v1/form-fills/${id}/fields/${encodeURIComponent(fieldId)}`, {
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     }),
+  approveAndExport: (id: string) => request<FormFill>(`/api/v1/form-fills/${id}/approve-and-export`, { method: "POST" }),
+  formFillOutput: (id: string) => `${API}/api/v1/form-fills/${id}/output`,
   grid: (artifactId: string, sheet: string, row = 1, column = 1) => {
     const minRow = Math.max(1, row - 8);
     const minCol = Math.max(1, column - 3);

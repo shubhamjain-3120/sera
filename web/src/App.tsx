@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { AlertTriangle, Archive, Check, ChevronLeft, FileImage, FileSpreadsheet, FileText, ListChecks, LoaderCircle, Lock, Plus, Save, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, Archive, Check, ChevronLeft, FileImage, FileSpreadsheet, FileText, LoaderCircle, Lock, Plus, Save, Search, ShieldCheck, Upload, X, Download, CheckCircle2 } from "lucide-react";
 import { API, api, type GridCell } from "./api";
-import type { Agency, Artifact, Draft, EvidenceFact, EvidenceLocation, EvidenceSource, FieldType, FillPlanTarget, Location, MappingCandidate, ReviewAction, ReviewDecision, TemplateField } from "./types";
+import type { Agency, Artifact, Draft, EvidenceFact, EvidenceLocation, EvidenceSource, FieldType, FormFill, Location, TemplateField } from "./types";
 
 function App() {
-  return <Routes><Route path="/" element={<Library />} /><Route path="/templates/:artifactId/:draftId" element={<Inspector />} /><Route path="/evidence" element={<EvidenceLibrary />} /><Route path="/evidence/process/:artifactId" element={<EvidenceRun />} /><Route path="/evidence/:artifactId/:snapshotId" element={<EvidenceInspector />} /><Route path="/fill-plans" element={<FillPlanLibrary />} /><Route path="/fill-plans/:fillPlanId" element={<FillPlanInspector />} /></Routes>;
+  return <Routes><Route path="/" element={<Library />} /><Route path="/templates/:artifactId/:draftId" element={<Inspector />} /><Route path="/evidence" element={<EvidenceLibrary />} /><Route path="/evidence/process/:artifactId" element={<EvidenceRun />} /><Route path="/evidence/:artifactId/:snapshotId" element={<EvidenceInspector />} /><Route path="/form-fills" element={<FormFillLibrary />} /><Route path="/form-fills/:formFillId" element={<FormFillInspector />} /></Routes>;
 }
 
 function Brand() {
@@ -14,7 +14,7 @@ function Brand() {
 }
 
 function WorkspaceNav() {
-  return <nav className="workspace-nav"><Link to="/">Templates</Link><Link to="/evidence">Evidence</Link><Link to="/fill-plans">Fill Plans</Link></nav>;
+  return <nav className="workspace-nav"><Link to="/">Templates</Link><Link to="/evidence">Evidence</Link><Link to="/form-fills">Form Fills</Link></nav>;
 }
 
 function Library() {
@@ -162,51 +162,7 @@ function isCoarseRegion(location: EvidenceLocation) {
   return normalized ? area >= 0.55 : area / (width * height) >= 0.55;
 }
 
-function FillPlanLibrary() {
-  const navigate = useNavigate();
-  const client = useQueryClient();
-  const [caseKey, setCaseKey] = useState("");
-  const [agencyKey, setAgencyKey] = useState("");
-  const [creationRunId, setCreationRunId] = useState<string | null>(null);
-  const plans = useQuery({ queryKey: ["fill-plans"], queryFn: api.listFillPlans });
-  const templates = useQuery({ queryKey: ["artifacts"], queryFn: api.listArtifacts });
-  const cases = useQuery({ queryKey: ["cases"], queryFn: api.listCases });
-  const agencies = useQuery({ queryKey: ["agencies"], queryFn: api.listAgencies });
-  const activeCase = caseKey || cases.data?.[0]?.case_key || "";
-  const activeAgency = agencyKey || agencies.data?.find((item) => item.is_default)?.key || "";
-  const creationRun = useQuery({ queryKey: ["run", creationRunId], queryFn: () => api.run(creationRunId!), enabled: Boolean(creationRunId), refetchInterval: (query) => ["succeeded", "failed"].includes(query.state.data?.status ?? "") ? false : 700 });
-  const create = useMutation({
-    mutationFn: async (templateVersionId: string) => {
-      if (!activeCase) throw new Error("Ingest evidence for a case before creating a Fill Plan");
-      return api.createFillPlan(activeCase, templateVersionId, activeAgency);
-    },
-    onSuccess: (run) => { setCreationRunId(run.id); client.invalidateQueries({ queryKey: ["fill-plans"] }); },
-  });
-  const remove = useMutation({
-    mutationFn: api.deleteFillPlan,
-    onSuccess: (_result, id) => {
-      client.invalidateQueries({ queryKey: ["fill-plans"] });
-      if (location.pathname === `/fill-plans/${id}`) navigate("/fill-plans");
-    },
-  });
-  const confirmDelete = (id: string, name: string) => {
-    if (window.confirm(`Delete the Fill Plan for ${name}? Its revisions, verification reports, and review decisions will be removed.`)) remove.mutate(id);
-  };
-  const fillPlanId = creationRun.data?.result?.fill_plan_id;
-  useEffect(() => {
-    if (creationRun.data?.status === "succeeded" && typeof fillPlanId === "string") navigate(`/fill-plans/${fillPlanId}`);
-  }, [creationRun.data?.status, fillPlanId, navigate]);
-  const creationError = create.error?.message ?? creationRun.error?.message ?? (creationRun.data?.status === "failed" ? creationRun.data.error ?? "Fill Plan creation failed" : null);
-  return <div className="app-shell">
-    <header><Brand /><WorkspaceNav /><div className="phase-badge"><span /> Phase 5 · Human review</div></header>
-    <main className="library fill-plan-library">
-      <section className="hero fill-plan-hero"><p className="eyebrow">Grounded mapping</p><h1>Map evidence.<br /><em>Expose uncertainty.</em></h1><p>Create a revisioned Fill Plan against the latest published template version and a frozen case-evidence bundle. Nothing is written to the original target.</p><div className="upload-row"><label className="picker"><span>Agency</span><select aria-label="Filing agency" value={activeAgency} onChange={(event) => setAgencyKey(event.target.value)}>{agencies.data?.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}</select></label><label className="picker"><span>Case</span><select aria-label="Mapping case" value={activeCase} onChange={(event) => setCaseKey(event.target.value)}>{cases.data?.length ? cases.data.map((item) => <option key={item.case_key} value={item.case_key}>{item.case_key} · {item.source_count} source{item.source_count === 1 ? "" : "s"}</option>) : <option value="">No ingested cases yet</option>}</select></label></div>{creationError && <div className="error-banner">{creationError}</div>}{creationRun.data && !["succeeded", "failed"].includes(creationRun.data.status) && <div className="run-progress" role="status"><LoaderCircle size={16} className="spin" /><span>Creating Fill Plan · {creationRun.data.stage.replaceAll("_", " ")}</span><strong>{creationRun.data.progress}%</strong><progress value={creationRun.data.progress} max={100} /></div>}</section>
-      {agencies.data && activeAgency && <AgencyDetails agency={agencies.data.find((item) => item.key === activeAgency)!} />}
-      <section className="recent"><div className="section-heading"><div><span className="eyebrow">Published targets</span><h2>Start a Fill Plan</h2></div><span>{templates.data?.length ?? 0} templates</span></div><div className="artifact-grid">{templates.data?.map((artifact) => <ArtifactPlanCard key={artifact.id} artifact={artifact} caseKey={activeCase} creating={create.isPending || Boolean(creationRunId && !["succeeded", "failed"].includes(creationRun.data?.status ?? ""))} onCreate={(versionId) => { setCreationRunId(null); create.mutate(versionId); }} />)}</div></section>
-      <section className="recent"><div className="section-heading"><div><span className="eyebrow">Frozen proposals</span><h2>Fill Plans</h2></div><span>{plans.data?.length ?? 0} total</span></div>{plans.isLoading ? <div className="empty"><LoaderCircle className="spin" /> Loading Fill Plans</div> : plans.data?.length ? <div className="artifact-grid">{plans.data.map((plan) => <div className="artifact-card" key={plan.id}><Link to={`/fill-plans/${plan.id}`} style={{ display: "contents" }}><div className="file-icon mapping"><ListChecks /></div><div><h3>{plan.template_name}</h3><p>{plan.case_key} · Revision {plan.current_revision} · {plan.issue_count} issues</p></div>{plan.blocker_count ? <span className="blocker-count">{plan.blocker_count} blocked</span> : <span className="hash">ready</span>}</Link><button className="icon-button danger" type="button" aria-label={`Delete ${plan.template_name} Fill Plan`} disabled={remove.isPending} onClick={() => confirmDelete(plan.id, plan.template_name)}><Trash2 size={15} /></button></div>)}</div> : <div className="empty">No Fill Plans yet. Publish a template and choose a case above.</div>}{remove.error && <div className="error-banner">{remove.error.message}</div>}</section>
-    </main>
-  </div>;
-}
+function ArtifactCard({ item }: { item: Artifact }) { const Icon = item.kind === "pdf" ? FileText : FileSpreadsheet; return <Link className="artifact-card" to={`/templates/${item.id}/${item.draft_id}?run=${item.run_id}`}><div className={`file-icon ${item.kind}`}><Icon /></div><div><h3>{item.filename}</h3><p>{item.kind.toUpperCase()} · {(item.size_bytes / 1024).toFixed(0)} KB</p></div><span className="hash">{item.sha256.slice(0, 8)}</span></Link>; }
 
 function ArtifactPlanCard({ artifact, caseKey, creating, onCreate }: { artifact: Artifact; caseKey: string; creating: boolean; onCreate: (versionId: string) => void }) {
   const versions = useQuery({ queryKey: ["versions", artifact.draft_id], queryFn: () => api.versions(artifact.draft_id) });
@@ -214,138 +170,57 @@ function ArtifactPlanCard({ artifact, caseKey, creating, onCreate }: { artifact:
   const latest = [...(versions.data ?? [])].sort((a, b) => b.version - a.version)[0];
   const stale = Boolean(latest && draft.data && draft.data.revision > latest.source_revision);
   const disabled = creating || !caseKey || !latest || stale || versions.isLoading || draft.isLoading;
-  return <button className="artifact-card mapping-create template-version-card" key={artifact.id} onClick={() => latest && onCreate(latest.id)} disabled={disabled}>
-    <div className={`file-icon ${artifact.kind}`}>{artifact.kind === "pdf" ? <FileText /> : <FileSpreadsheet />}</div>
-    <div><h3>{artifact.filename}</h3>{versions.isLoading || draft.isLoading ? <p>Checking published version…</p> : latest ? <><p>Selected: version {latest.version} · revision {latest.source_revision}</p>{stale && <small className="stale-template">Draft revision {draft.data?.revision} is newer. Publish it before creating a Fill Plan.</small>}</> : <small className="stale-template">No published version. Publish this template before creating a Fill Plan.</small>}<small>{caseKey ? `Case ${caseKey}` : "Select a case first"}</small></div><Plus size={16} />
-  </button>;
+  return <button className="artifact-card mapping-create template-version-card" onClick={() => latest && onCreate(latest.id)} disabled={disabled}><div className={`file-icon ${artifact.kind}`}>{artifact.kind === "pdf" ? <FileText /> : <FileSpreadsheet />}</div><div><h3>{artifact.filename}</h3><small>{latest ? `Published version ${latest.version}` : "No published version"}</small></div><Plus size={16} /></button>;
 }
 
-const AGENCY_DETAIL_FIELDS: Array<[string, string]> = [
-  ["legal_name", "Legal name"], ["contact_name", "Contact"], ["address_line1", "Address"], ["address_line2", "Address line 2"],
-  ["city", "City"], ["state", "State"], ["postal_code", "ZIP code"], ["phone", "Phone"], ["fax", "Fax"],
-  ["email", "Email"], ["website", "Website"], ["producer_number", "Producer number"], ["license_number", "License number"], ["naic_code", "NAIC code"],
-];
-
-function AgencyDetails({ agency }: { agency: Agency }) {
-  const client = useQueryClient();
-  const [draft, setDraft] = useState<Record<string, string>>(agency.details);
-  const [open, setOpen] = useState(false);
-  useEffect(() => setDraft(agency.details), [agency.key, agency.details]);
-  const save = useMutation({
-    mutationFn: () => api.updateAgency(agency.key, draft),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["agencies"] }),
-  });
-  const dirty = AGENCY_DETAIL_FIELDS.some(([key]) => (draft[key] ?? "") !== (agency.details[key] ?? ""));
-  const filled = AGENCY_DETAIL_FIELDS.filter(([key]) => (agency.details[key] ?? "").trim()).length;
-  return <section className="recent agency-panel">
-    <div className="section-heading"><div><span className="eyebrow">Trusted source</span><h2>{agency.name} details</h2></div><button className="ghost" onClick={() => setOpen(!open)}>{filled} of {AGENCY_DETAIL_FIELDS.length} set · {open ? "Hide" : "Edit"}</button></div>
-    {open && <div className="agency-grid">{AGENCY_DETAIL_FIELDS.map(([key, label]) => <label key={key}><span>{label}</span><input value={draft[key] ?? ""} placeholder="—" onChange={(event) => setDraft({ ...draft, [key]: event.target.value })} /></label>)}</div>}
-    {open && <div className="agency-actions"><p>These values fill agency-owned fields on every form and are never taken from an applicant's documents.</p><button className="primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}><Save size={15} /> {save.isPending ? "Saving…" : "Save details"}</button></div>}
-    {save.error && <div className="error-banner">{save.error.message}</div>}
-  </section>;
-}
-
-function FillPlanInspector() {
-  const { fillPlanId = "" } = useParams();
+function FormFillLibrary() {
   const navigate = useNavigate();
-  const plan = useQuery({ queryKey: ["fill-plan", fillPlanId], queryFn: () => api.fillPlan(fillPlanId) });
-  if (!plan.data) return <div className="center"><LoaderCircle className="spin" /> Loading Fill Plan…</div>;
-  return <FillPlanView plan={plan.data} onDeleted={() => navigate("/fill-plans")} />;
-}
-
-function FillPlanView({ plan, onDeleted }: { plan: Awaited<ReturnType<typeof api.fillPlan>>; onDeleted: () => void }) {
+  const [caseKey, setCaseKey] = useState("");
+  const [agencyKey, setAgencyKey] = useState("");
+  const [creationRunId, setCreationRunId] = useState<string | null>(null);
   const client = useQueryClient();
-  const remove = useMutation({
-    mutationFn: api.deleteFillPlan,
-    onSuccess: () => { client.invalidateQueries({ queryKey: ["fill-plans"] }); onDeleted(); },
-  });
-  const confirmDelete = () => {
-    if (window.confirm(`Delete the Fill Plan for ${plan.template_name}? Its revisions, verification reports, and review decisions will be removed.`)) remove.mutate(plan.id);
-  };
-  const [selectedId, setSelectedId] = useState(plan.payload.targets[0]?.field.id ?? "");
-  const [filter, setFilter] = useState("");
-  const [showAllFields, setShowAllFields] = useState(false);
-  const fields = plan.payload.targets.map((item) => ({ ...item.field, current_value: mappingRawValue(item) }));
-  const exceptions = plan.payload.targets.filter(isExceptionTarget);
-  const visible = (showAllFields ? plan.payload.targets : exceptions).filter((item) => `${item.field.label} ${item.field.semantic_type ?? ""}`.toLowerCase().includes(filter.toLowerCase()));
-  const target = visible.find((item) => item.field.id === selectedId);
-  const inspection = plan.payload.template_schema.inspection as { format?: "pdf" | "xlsx"; page_count?: number; sheets?: Array<{ name: string; state: string; protected: boolean }> };
-  const decisions = useQuery({ queryKey: ["review-decisions", plan.id], queryFn: () => api.listReviewDecisions(plan.id) });
-  const review = useMutation({
-    mutationFn: (input: { action: ReviewAction; reason?: string; candidate_id?: string; value?: unknown }) => api.reviewFillPlan(plan.id, { expected_revision: plan.current_revision, target_field_id: selectedId, actor: "Local reviewer", ...input }),
-    onSuccess: () => { client.invalidateQueries({ queryKey: ["fill-plan", plan.id] }); client.invalidateQueries({ queryKey: ["review-decisions", plan.id] }); },
-  });
-  useEffect(() => {
-    if (visible.length && !visible.some((item) => item.field.id === selectedId)) setSelectedId(visible[0].field.id);
-  }, [selectedId, visible]);
-  return <div className="inspector mapping-inspector">
-    <header><Brand /><div className="crumb"><ChevronLeft size={16} /><Link to="/fill-plans">Fill Plans</Link><span>/</span><strong>{plan.template_name}</strong></div><div className="header-actions"><div className="snapshot-badge"><Lock size={13} /> Evidence frozen · {plan.evidence_bundle_sha256.slice(0, 10)}</div><button className="icon-button danger" type="button" aria-label="Delete Fill Plan" disabled={remove.isPending} onClick={confirmDelete}><Trash2 size={15} /></button></div></header>
-    <div className="workbench mapping-workbench">
-      <aside className="field-list"><div className="panel-title"><div><p className="eyebrow">{showAllFields ? "All targets" : "Exception queue"}</p><h2>{visible.length} {showAllFields ? "fields" : "exceptions"}</h2></div></div><label className="search"><Search size={15} /><input placeholder="Find a target field" value={filter} onChange={(event) => setFilter(event.target.value)} /></label><div className="evidence-summary"><span>{exceptions.length} exceptions</span><span>{plan.blocker_count} blockers</span><button type="button" className="all-fields-toggle" aria-pressed={showAllFields} onClick={() => setShowAllFields((value) => !value)}>{showAllFields ? "Exceptions only" : "All fields"}</button></div><div className="field-scroll">{visible.map((item, index) => <button key={item.field.id} className={`field-row mapping-row ${item.field.id === selectedId ? "active" : ""}`} onClick={() => setSelectedId(item.field.id)}><span className="field-number">{String(index + 1).padStart(2, "0")}</span><span><strong>{item.field.label}</strong><small>{mappingValue(item)}</small></span><i className={`mapping-state ${item.state}`} /></button>)}{!visible.length && <div className="queue-empty">{showAllFields ? "No fields match this search." : "No unresolved, conflicting, or low-confidence exceptions."}</div>}</div></aside>
-      <main className="preview-panel"><div className="preview-toolbar"><div><strong>Reviewed preview</strong><span> · overlay only, no output generated</span></div><div className="legend"><i className="selected" /> Selected target</div></div>{plan.payload.issues.some((issue) => issue.severity === "blocker") && <div className="warning"><AlertTriangle size={15} /> This plan contains blockers and cannot proceed to later finalization.</div>}{plan.payload.preview_calculation?.status === "stale" && <div className="warning"><AlertTriangle size={15} /> {plan.payload.preview_calculation.message}</div>}{inspection.format === "pdf" ? <PdfPreview artifactId={plan.target_artifact_id} fields={fields} selected={selectedId} onSelect={setSelectedId} pages={inspection.page_count ?? 1} /> : <WorkbookPreview artifactId={plan.target_artifact_id} fields={fields} selected={selectedId} onSelect={setSelectedId} sheets={inspection.sheets ?? []} />}</main>
-      <aside className="properties">{remove.error && <div className="error-banner">{remove.error.message}</div>}{review.error && <div className="error-banner">{review.error.message}</div>}{target ? <MappingProperties target={target} onReview={(input) => review.mutate(input)} pending={review.isPending} decisions={(decisions.data ?? []).filter((item) => item.target_field_id === target.field.id)} /> : <div className="empty-property"><Archive /><p>Select a target to inspect its proposals.</p></div>}</aside>
-    </div>
-  </div>;
+  const fills = useQuery({ queryKey: ["form-fills"], queryFn: api.listFormFills });
+  const templates = useQuery({ queryKey: ["artifacts"], queryFn: api.listArtifacts });
+  const cases = useQuery({ queryKey: ["cases"], queryFn: api.listCases });
+  const agencies = useQuery({ queryKey: ["agencies"], queryFn: api.listAgencies });
+  const activeCase = caseKey || cases.data?.[0]?.case_key || "";
+  const activeAgency = agencyKey || agencies.data?.find((item) => item.is_default)?.key || "";
+  const creationRun = useQuery({ queryKey: ["run", creationRunId], queryFn: () => api.run(creationRunId!), enabled: Boolean(creationRunId), refetchInterval: (q) => ["succeeded", "failed"].includes(q.state.data?.status ?? "") ? false : 700 });
+  const create = useMutation({ mutationFn: (versionId: string) => api.createFormFill(activeCase, versionId, activeAgency), onSuccess: (run) => { setCreationRunId(run.id); } });
+  useEffect(() => { const id = creationRun.data?.result?.form_fill_id; if (creationRun.data?.status === "succeeded" && typeof id === "string") { client.invalidateQueries({ queryKey: ["form-fills"] }); navigate(`/form-fills/${id}`); } }, [creationRun.data?.status, creationRun.data?.result, navigate, client]);
+  return <div className="app-shell"><header><Brand /><WorkspaceNav /><div className="phase-badge"><span /> Form fills</div></header><main className="library form-fill-library"><section className="hero form-fill-hero"><p className="eyebrow">Simple mapping</p><h1>Fill forms.<br /><em>Review once.</em></h1><p>Choose a case and published template. Sol proposes values and you review the form before generating the carrier file.</p><div className="upload-row"><label className="picker"><span>Agency</span><select aria-label="Filing agency" value={activeAgency} onChange={(e) => setAgencyKey(e.target.value)}>{agencies.data?.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}</select></label><label className="picker"><span>Case</span><select aria-label="Mapping case" value={activeCase} onChange={(e) => setCaseKey(e.target.value)}>{cases.data?.length ? cases.data.map((item) => <option key={item.case_key} value={item.case_key}>{item.case_key} · {item.source_count} source{item.source_count === 1 ? "" : "s"}</option>) : <option value="">No ingested cases yet</option>}</select></label></div>{create.error && <div className="error-banner">{create.error.message}</div>}{creationRun.data && !["succeeded", "failed"].includes(creationRun.data.status) && <div className="run-progress"><LoaderCircle size={16} className="spin" /><span>Mapping with Sol…</span><strong>{creationRun.data.progress}%</strong></div>}{creationRun.data?.status === "failed" && <div className="error-banner">{creationRun.data.error ?? "Form Fill mapping failed"}</div>}</section><section className="recent"><div className="section-heading"><div><span className="eyebrow">Published targets</span><h2>Start a Form Fill</h2></div><span>{templates.data?.length ?? 0} templates</span></div><div className="artifact-grid">{templates.data?.map((artifact) => <ArtifactPlanCard key={artifact.id} artifact={artifact} caseKey={activeCase} creating={create.isPending || Boolean(creationRunId && creationRun.data?.status === "running")} onCreate={(versionId) => { setCreationRunId(null); create.mutate(versionId); }} />)}</div></section><section className="recent"><div className="section-heading"><div><span className="eyebrow">Review queue</span><h2>Form Fills</h2></div><span>{fills.data?.length ?? 0} total</span></div>{fills.isLoading ? <div className="empty"><LoaderCircle className="spin" /> Loading Form Fills</div> : fills.data?.length ? <div className="artifact-grid">{fills.data.map((fill) => <Link className="artifact-card" key={fill.id} to={`/form-fills/${fill.id}`}><div className="file-icon mapping"><FileText /></div><div><h3>{fill.template_name}</h3><p>{fill.case_key} · {fill.status}</p></div><span className="hash">open</span></Link>)}</div> : <div className="empty">No Form Fills yet. Choose a case and template above.</div>}</section></main></div>;
 }
 
-function isExceptionTarget(target: FillPlanTarget) {
-  if (target.review?.status === "approved") return false;
-  if (target.issues.some((issue) => issue.severity === "blocker" || issue.severity === "review")) return true;
-  if (target.state === "not_applicable") return false;
-  if (["unresolved", "dependency_changed"].includes(target.state)) return true;
-  const selected = target.candidates.find((candidate) => candidate.id === target.selected_candidate_id);
-  if (selected?.approval_state === "system_approved" || selected?.approval_state === "human_approved") return false;
-  if (selected?.approval_state === "needs_review") return true;
-  return !selected || target.state !== "reviewed";
+function FormFillInspector() {
+  const { formFillId = "" } = useParams();
+  const fill = useQuery({ queryKey: ["form-fill", formFillId], queryFn: () => api.formFill(formFillId) });
+  if (!fill.data) return <div className="center"><LoaderCircle className="spin" /> Loading Form Fill…</div>;
+  return <FormFillView fill={fill.data} />;
 }
 
-function mappingValue(target: FillPlanTarget) {
-  const selected = target.candidates.find((candidate) => candidate.id === target.selected_candidate_id);
-  if (selected) {
-    const value = selected.canonical_value ?? selected.value;
-    const formatted = value === null ? "Explicitly absent" : String(value);
-    return selected.approval_state === "system_approved" ? `System approved · ${formatted}` : formatted;
-  }
-  return target.state === "not_applicable" ? "Not writable" : "Unresolved";
+function FormFillView({ fill }: { fill: FormFill }) {
+  const client = useQueryClient();
+  const [selectedId, setSelectedId] = useState(fill.fields[0]?.field.id ?? "");
+  const selected = fill.fields.find((item) => item.field.id === selectedId) ?? fill.fields[0];
+  const update = useMutation({ mutationFn: (input: { write_value: unknown; evidence_fact_ids?: string[] }) => api.updateFormFillField(fill.id, selectedId, input), onSuccess: () => client.invalidateQueries({ queryKey: ["form-fill", fill.id] }) });
+  const approve = useMutation({ mutationFn: () => api.approveAndExport(fill.id), onSuccess: () => client.invalidateQueries({ queryKey: ["form-fill", fill.id] }) });
+  const inspection = selected?.field.location.kind === "pdf_rect" ? { format: "pdf" as const, page_count: Math.max(...fill.fields.flatMap((x) => [x.field.location.page ?? 1])) } : { format: "xlsx" as const, sheets: [...new Set(fill.fields.map((x) => x.field.location.sheet).filter(Boolean))].map((name) => ({ name: name!, state: "visible", protected: false })) };
+  const [value, setValue] = useState(selected?.write_value == null ? "" : String(selected.write_value));
+  const [linkedFactId, setLinkedFactId] = useState("");
+  const [unusedFactId, setUnusedFactId] = useState("");
+  const [unusedFieldId, setUnusedFieldId] = useState(fill.fields[0]?.field.id ?? "");
+  const [unusedValue, setUnusedValue] = useState("");
+  const linkUnused = useMutation({ mutationFn: () => api.updateFormFillField(fill.id, unusedFieldId, { write_value: unusedValue, evidence_fact_ids: [unusedFactId] }), onSuccess: () => { client.invalidateQueries({ queryKey: ["form-fill", fill.id] }); setUnusedFactId(""); } });
+  useEffect(() => setValue(selected?.write_value == null ? "" : String(selected.write_value)), [selected?.field.id, selected?.write_value]);
+  useEffect(() => setLinkedFactId(selected?.evidence_fact_ids?.[0] ?? ""), [selected?.field.id, selected?.evidence_fact_ids]);
+  const save = () => update.mutate({ write_value: value, evidence_fact_ids: linkedFactId ? [linkedFactId] : [] });
+  const fieldViews = fill.fields.map((item) => ({ ...item.field, current_value: item.write_value, title: item.snippets?.map((s) => s.text).join("\n") || (item.origin === "human" ? "Entered by reviewer" : "No source snippet") }));
+  const groups = ["business", "people", "vehicles", "coverage", "other"];
+  const category = (role: string) => { const r = role.toLowerCase(); if (/business|company|applicant|insured|owner/.test(r)) return "business"; if (/driver|person|people|officer|employee/.test(r)) return "people"; if (/vehicle|truck|auto|unit/.test(r)) return "vehicles"; if (/coverage|policy|limit|claim|loss/.test(r)) return "coverage"; return "other"; };
+  return <div className="inspector mapping-inspector"><header><Brand /><div className="crumb"><ChevronLeft size={16} /><Link to="/form-fills">Form Fills</Link><span>/</span><strong>{fill.template_name}</strong></div><div className="header-actions"><span className={`snapshot-badge ${fill.status === "approved" ? "saved" : ""}`}>{fill.status}</span><button className="primary small" onClick={() => approve.mutate()} disabled={approve.isPending || ["mapping", "mapping_failed"].includes(fill.status)}>{approve.isPending ? "Generating…" : <><CheckCircle2 size={15} /> Approve & Generate</>}</button></div></header><div className="workbench mapping-workbench"><aside className="field-list"><div className="panel-title"><div><p className="eyebrow">Template fields</p><h2>{fill.fields.length} fields</h2></div></div><div className="field-scroll">{fill.fields.map((item, index) => <button key={item.field.id} className={`field-row mapping-row ${item.field.id === selectedId ? "active" : ""}`} onClick={() => setSelectedId(item.field.id)}><span className="field-number">{String(index + 1).padStart(2, "0")}</span><span><strong>{item.field.label}</strong><small>{item.write_value == null || item.write_value === "" ? "Blank" : String(item.write_value)}</small></span></button>)}</div></aside><main className="preview-panel"><div className="preview-toolbar"><div><strong>Review overlay</strong><span> · hover a field for its source snippet</span></div></div>{inspection.format === "pdf" ? <PdfPreview artifactId={fill.target_artifact_id} fields={fieldViews} selected={selectedId} onSelect={setSelectedId} pages={inspection.page_count ?? 1} /> : <WorkbookPreview artifactId={fill.target_artifact_id} fields={fieldViews} selected={selectedId} onSelect={setSelectedId} sheets={inspection.sheets ?? []} />}{fill.output_available && inspection.format === "pdf" && <iframe className="output-preview" title="Generated PDF preview" src={`${api.formFillOutput(fill.id)}?preview=1`} />}</main><aside className="properties"><div className="panel-title"><div><p className="eyebrow">Human review</p><h2>{selected?.field.label}</h2></div></div>{selected && <div className="mapping-properties"><label>Value<input value={value} onChange={(e) => setValue(e.target.value)} /></label><button className="primary small" onClick={save} disabled={update.isPending || selected.field.writable === false || ["action", "signature"].includes(selected.field.field_type)}><Save size={14} /> Save value</button><button className="secondary" onClick={() => update.mutate({ write_value: "", evidence_fact_ids: [] })} disabled={selected.field.writable === false || ["action", "signature"].includes(selected.field.field_type)}>Clear value</button>{selected.snippets?.length ? <div className="evidence-card"><span>Source snippets</span>{selected.snippets.map((snippet, index) => <p key={index}><q>{snippet.text}</q></p>)}</div> : <div className="location-card"><span>Source</span><strong>{selected.origin === "human" ? "Entered by reviewer" : "No linked snippet"}</strong></div>}{update.error && <div className="error-banner">{update.error.message}</div>}</div>}{approve.error && <div className="error-banner">{approve.error.message}</div>}<div className="evidence-panel"><p className="eyebrow">Extracted information</p><p>{fill.evidence.filter((item) => item.used).length} used · {fill.evidence.filter((item) => !item.used).length} unused</p>{groups.map((group) => { const facts = fill.evidence.filter((item) => category(item.fact.entity_role || "") === group); return facts.length ? <div key={group}><strong>{group}</strong>{facts.map((item) => <div className={`fact-use ${item.used ? "used" : "unused"}`} key={item.fact.id} role="button" tabIndex={0} onClick={() => { if (!item.used) { setUnusedFactId(item.fact.id); setUnusedFieldId(fill.fields.find((candidate) => candidate.field.id === selectedId && candidate.field.writable !== false && !["action", "signature"].includes(candidate.field.field_type))?.field.id ?? fill.fields.find((candidate) => candidate.field.writable !== false && !["action", "signature"].includes(candidate.field.field_type))?.field.id ?? ""); setUnusedValue(String(item.fact.value ?? "")); } }}><span>{item.fact.label}: {String(item.fact.value ?? "")}</span><small>{item.used ? `Used in ${item.field_ids.length} field${item.field_ids.length === 1 ? "" : "s"}` : "Unused"}</small></div>)}</div> : null; })}</div>{unusedFactId && <div className="unused-fact-link"><strong>Use selected intake fact</strong><label>Field<select value={unusedFieldId} onChange={(event) => setUnusedFieldId(event.target.value)}>{fill.fields.filter((item) => item.field.writable !== false && !["action", "signature"].includes(item.field.field_type)).map((item) => <option key={item.field.id} value={item.field.id}>{item.field.label}</option>)}</select></label><label>Value<input value={unusedValue} onChange={(event) => setUnusedValue(event.target.value)} /></label><button className="primary small" onClick={() => linkUnused.mutate()} disabled={linkUnused.isPending || !unusedFieldId}>Save to field</button>{linkUnused.error && <div className="error-banner">{linkUnused.error.message}</div>}</div>}{fill.output_available && <a className="primary download-link" href={api.formFillOutput(fill.id)}><Download size={15} /> Download generated file</a>}{fill.output_error && <div className="error-banner">{fill.output_error}</div>}</aside></div></div>;
 }
 
-function mappingRawValue(target: FillPlanTarget) {
-  return target.candidates.find((candidate) => candidate.id === target.selected_candidate_id)?.value ?? null;
-}
-
-function MappingProperties({ target, onReview, pending, decisions }: { target: FillPlanTarget; onReview: (input: { action: ReviewAction; reason?: string; candidate_id?: string; value?: unknown }) => void; pending: boolean; decisions: ReviewDecision[] }) {
-  const selected = target.candidates.find((candidate) => candidate.id === target.selected_candidate_id);
-  const systemApproved = selected?.approval_state === "system_approved";
-  return <><div className="panel-title"><div><p className="eyebrow">{systemApproved ? "System mapping" : "Human review"}</p><h2>{systemApproved ? "System approved" : target.review ? "Human decision" : selected ? "Review proposal" : target.state === "not_applicable" ? "Excluded target" : "Resolve exception"}</h2></div></div><div className="mapping-properties"><div className="target-identity"><span>Target</span><strong>{target.field.label}</strong><small>{target.field.semantic_type ?? "No semantic type"} · {target.field.field_type}</small></div>{systemApproved && <div className="system-authority"><strong>Automatically approved by the mapping system</strong><span>This is system authority, not a human review decision.</span>{selected?.auto_approval_reasons?.map((reason) => <small key={reason}>{reason}</small>)}</div>}{target.review && <div className={`review-authority ${target.review.status}`}><strong>{target.review.status.replaceAll("_", " ")}</strong><span>{target.review.action.replaceAll("_", " ")} by {target.review.actor}</span>{target.review.prefilled_disposition && <small>Prefilled value: {target.review.prefilled_disposition}</small>}{target.review.reason && <small>{target.review.reason}</small>}</div>}{selected && <CandidateCard candidate={selected} selected />}{target.issues.map((issue) => <div className={`mapping-issue ${issue.severity}`} key={issue.id}><AlertTriangle size={13} /><span><strong>{issue.code.replaceAll("_", " ")}</strong>{issue.message}</span></div>)}<ReviewControls target={target} selected={selected} pending={pending} onReview={onReview} />{target.candidates.filter((candidate) => candidate.origin !== "human").length > 0 && <><p className="eyebrow alternatives-title">Model proposals</p>{target.candidates.filter((candidate) => candidate.origin !== "human").map((candidate) => <div key={candidate.id}><CandidateCard candidate={candidate} selected={candidate.id === target.selected_candidate_id} /><button className="secondary candidate-select" disabled={pending} onClick={() => onReview({ action: "select_candidate", candidate_id: candidate.id })}>Select and approve</button></div>)}</>}{!target.candidates.length && target.state !== "not_applicable" && <p className="empty-candidates">The model did not propose a supported value for this field. A reviewer may enter a value or record an exception.</p>}{decisions.length > 0 && <div className="decision-history"><p className="eyebrow">Decision history</p>{decisions.map((decision) => <div key={decision.id}><strong>{decision.action.replaceAll("_", " ")}</strong><span>Revision {decision.source_revision} → {decision.resulting_revision}</span><small>{decision.actor}{decision.reason ? ` · ${decision.reason}` : ""}</small></div>)}</div>}</div></>;
-}
-
-function ReviewControls({ target, selected, pending, onReview }: { target: FillPlanTarget; selected?: MappingCandidate; pending: boolean; onReview: (input: { action: ReviewAction; reason?: string; candidate_id?: string; value?: unknown }) => void }) {
-  const [value, setValue] = useState("");
-  const [reason, setReason] = useState("");
-  const submitEdit = () => {
-    const typed: unknown = target.field.field_type === "number" ? Number(value) : target.field.field_type === "boolean" ? value === "true" : value;
-    onReview({ action: "edit", value: typed, reason: reason || undefined });
-  };
-  const exception = (action: ReviewAction) => onReview({ action, reason: reason || undefined });
-  if (!target.field.writable || ["signature", "action"].includes(target.field.field_type)) return <p className="empty-candidates">This control is excluded by technical integrity rules.</p>;
-  if (target.review?.dependency_notice && !target.review.dependency_notice.acknowledged) return <div className="review-controls"><label>Required acknowledgement reason<textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label><button className="primary small" disabled={pending} onClick={() => exception("acknowledge_dependency")}>Acknowledge dependency change</button></div>;
-  const alreadyApproved = selected?.approval_state === "system_approved" || selected?.approval_state === "human_approved";
-  return <div className="review-controls">{selected && selected.origin !== "human" && !alreadyApproved && <button className="primary small" disabled={pending} onClick={() => onReview({ action: "approve" })}><Check size={14} /> Approve proposal</button>}{target.field.current_value !== null && target.field.current_value !== undefined && target.field.current_value !== "" && <button className="secondary" disabled={pending} onClick={() => onReview({ action: "retain_prefilled", reason: reason || undefined })}>Retain prefilled value</button>}<label>Reviewer value{target.field.field_type === "boolean" ? <select value={value} onChange={(event) => setValue(event.target.value)}><option value="">Choose…</option><option value="true">Yes</option><option value="false">No</option></select> : target.field.field_type === "choice" ? <select value={value} onChange={(event) => setValue(event.target.value)}><option value="">Choose…</option>{target.field.options.map((option) => <option key={option}>{option}</option>)}</select> : <input type={target.field.field_type === "number" ? "number" : target.field.field_type === "date" ? "date" : "text"} value={value} onChange={(event) => setValue(event.target.value)} />}</label><label>Reason {target.field.required ? "(required for exceptions)" : "(optional)"}<textarea rows={2} value={reason} onChange={(event) => setReason(event.target.value)} /></label><button className="secondary" disabled={pending || value === ""} onClick={submitEdit}>Save reviewer edit</button><div className="exception-actions"><button disabled={pending} onClick={() => exception("clear")}>Clear</button><button disabled={pending} onClick={() => exception("not_applicable")}>N/A</button><button disabled={pending} onClick={() => exception("intentional_blank")}>Intentional blank</button></div></div>;
-}
-
-function CandidateCard({ candidate, selected }: { candidate: MappingCandidate; selected: boolean }) {
-  const location = candidate.provenance[0];
-  const canonicalValue = candidate.canonical_value ?? candidate.value;
-  const factIds = candidate.evidence_fact_ids?.length ? candidate.evidence_fact_ids : candidate.fact_id ? [candidate.fact_id] : [];
-  const sourcePath = candidate.source_artifact_id && candidate.snapshot_id ? `/evidence/${candidate.source_artifact_id}/${candidate.snapshot_id}` : null;
-  const evidenceLinks = candidate.evidence_sources?.length
-    ? candidate.evidence_sources.map((source) => ({ factId: source.fact_id, path: `/evidence/${source.artifact_id}/${source.snapshot_id}` }))
-    : sourcePath ? factIds.map((factId) => ({ factId, path: sourcePath })) : [];
-  const approvalLabel = candidate.approval_state === "system_approved" ? "System approved" : candidate.approval_state === "human_approved" ? "Human approved" : candidate.approval_state === "needs_review" ? "Needs review" : selected ? "Selected" : "Alternative";
-  return <div className={`candidate-card ${selected ? "selected" : ""}`}><div className="candidate-heading"><strong>{canonicalValue === null ? "Explicitly absent" : String(canonicalValue)}</strong><span className={`approval-pill ${candidate.approval_state ?? "legacy"}`}>{approvalLabel}</span></div><p>{candidate.fact_key ?? candidate.derivation?.operation} · {candidate.entity_role ?? "derived"}</p><div className="candidate-metrics"><span>Evidence {Math.round(candidate.evidence_confidence * 100)}%</span><span>{candidate.mapping_method ?? candidate.resolution}</span>{candidate.unit && <span>{candidate.unit}</span>}{candidate.date_context && <span>{candidate.date_context}</span>}</div><div className="value-audit"><div><span>Canonical value</span><strong>{canonicalValue === null ? "Explicitly absent" : String(canonicalValue)}</strong></div><div><span>Form write value</span><code>{candidate.write_value === undefined ? "Not specified" : candidate.write_value === null ? "null" : String(candidate.write_value)}</code></div></div>{location && <div className="location-card"><span>Exact evidence</span><strong>{formatEvidenceLocation(location)}</strong><small>{location.coordinate_system}</small></div>}{evidenceLinks.length ? <div className="candidate-facts">{evidenceLinks.map(({ factId, path }) => <Link className="source-link" key={`${path}-${factId}`} to={`${path}?fact=${encodeURIComponent(factId)}`}>Open supporting fact {factId} →</Link>)}</div> : sourcePath && <Link className="source-link" to={sourcePath}>Open immutable source evidence →</Link>}{candidate.derivation && <div className="derivation-card"><span>Derivation depth {candidate.derivation.depth}</span><strong>{candidate.derivation.operation}</strong><small>Inputs: {candidate.derivation.input_ids.join(", ")}</small></div>}{candidate.uncertainty.map((item) => <div className="uncertainty" key={item}><AlertTriangle size={13} />{item}</div>)}</div>;
-}
-
-function ArtifactCard({ item }: { item: Artifact }) {
++function ArtifactCard({ item }: { item: Artifact }) {
   const Icon = item.kind === "pdf" ? FileText : FileSpreadsheet;
   return <Link className="artifact-card" to={`/templates/${item.id}/${item.draft_id}?run=${item.run_id}`}>
     <div className={`file-icon ${item.kind}`}><Icon /></div>
@@ -407,7 +282,7 @@ function PdfPreview({ artifactId, fields, selected, onSelect, pages }: { artifac
   const [page, setPage] = useState(fields.find((f) => f.id === selected)?.location.page ?? 1);
   useEffect(() => { const next = fields.find((f) => f.id === selected)?.location.page; if (next) setPage(next); }, [selected, fields]);
   const pageFields = fields.flatMap((field) => (field.widgets?.length ? field.widgets : [field.location]).filter((location) => location.kind === "pdf_rect" && location.page === page).map((location, index) => ({ field, location, index })));
-  return <div className="pdf-wrap"><div className="page-nav"><button disabled={page <= 1} onClick={() => setPage(page - 1)}>←</button><span>Page {page} of {pages}</span><button disabled={page >= pages} onClick={() => setPage(page + 1)}>→</button></div><div className="paper"><img alt={`PDF page ${page}`} src={`${API}/api/v1/artifacts/${artifactId}/pages/${page}.png?scale=1.5`} />{pageFields.map(({ field, location, index }) => <button title={`${field.label}${field.current_value == null ? "" : `: ${String(field.current_value)}`}`} aria-label={field.label} key={`${field.id}-${index}`} onClick={() => onSelect(field.id)} className={`pdf-field ${selected === field.id ? "active" : ""}`} style={pdfRectStyle(location)}>{field.current_value !== null && field.current_value !== undefined && <span>{String(field.current_value)}</span>}</button>)}</div></div>;
+  return <div className="pdf-wrap"><div className="page-nav"><button disabled={page <= 1} onClick={() => setPage(page - 1)}>←</button><span>Page {page} of {pages}</span><button disabled={page >= pages} onClick={() => setPage(page + 1)}>→</button></div><div className="paper"><img alt={`PDF page ${page}`} src={`${API}/api/v1/artifacts/${artifactId}/pages/${page}.png?scale=1.5`} />{pageFields.map(({ field, location, index }) => <button title={(field as TemplateField & { title?: string }).title ?? `${field.label}${field.current_value == null ? "" : `: ${String(field.current_value)}`}`} aria-label={field.label} key={`${field.id}-${index}`} onClick={() => onSelect(field.id)} className={`pdf-field ${selected === field.id ? "active" : ""}`} style={pdfRectStyle(location)}>{field.current_value !== null && field.current_value !== undefined && <span>{String(field.current_value)}</span>}</button>)}</div></div>;
 }
 
 function pdfRectStyle(location: Location) {
@@ -439,7 +314,7 @@ function WorkbookPreview({ artifactId, fields, selected, onSelect, sheets }: { a
   const anchor = cellAnchor(target?.location.cell_range);
   const grid = useQuery({ queryKey: ["grid", artifactId, sheet, anchor.row, anchor.column], queryFn: () => api.grid(artifactId, sheet, anchor.row, anchor.column), enabled: Boolean(sheet) });
   const byCell = new Map(fields.filter((f) => f.location.sheet === sheet).map((f) => [cellAnchor(f.location.cell_range).coordinate, f]));
-  return <div className="workbook"><div className="sheet-tabs">{sheets.map((item) => <button className={sheet === item.name ? "active" : ""} key={item.name} onClick={() => setSheet(item.name)}>{item.state !== "visible" && <span>◌</span>}{item.name}{item.protected && <Lock size={11} />}</button>)}</div><div className="grid-scroll">{grid.isLoading ? <div className="center"><LoaderCircle className="spin" /></div> : <table><tbody>{grid.data?.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell: GridCell) => { const field = byCell.get(cell.coordinate); const preview = field?.current_value; return <td key={cell.coordinate} title={`${cell.coordinate}${cell.formula ? " · formula" : ""}`} className={`${field ? "detected-cell" : ""} ${field?.id === selected ? "selected-cell" : ""} ${cell.formula ? "formula" : ""}`} onClick={() => field && onSelect(field.id)}><small>{cell.coordinate}</small><span>{preview !== null && preview !== undefined ? String(preview) : cell.value == null ? "" : String(cell.value)}</span></td>; })}</tr>)}</tbody></table>}</div></div>;
+  return <div className="workbook"><div className="sheet-tabs">{sheets.map((item) => <button className={sheet === item.name ? "active" : ""} key={item.name} onClick={() => setSheet(item.name)}>{item.state !== "visible" && <span>◌</span>}{item.name}{item.protected && <Lock size={11} />}</button>)}</div><div className="grid-scroll">{grid.isLoading ? <div className="center"><LoaderCircle className="spin" /></div> : <table><tbody>{grid.data?.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell: GridCell) => { const field = byCell.get(cell.coordinate); const preview = field?.current_value; return <td key={cell.coordinate} title={field ? ((field as TemplateField & { title?: string }).title ?? cell.coordinate) : `${cell.coordinate}${cell.formula ? " · formula" : ""}`} className={`${field ? "detected-cell" : ""} ${field?.id === selected ? "selected-cell" : ""} ${cell.formula ? "formula" : ""}`} onClick={() => field && onSelect(field.id)}><small>{cell.coordinate}</small><span>{preview !== null && preview !== undefined ? String(preview) : cell.value == null ? "" : String(cell.value)}</span></td>; })}</tr>)}</tbody></table>}</div></div>;
 }
 
 function cellAnchor(cellRange?: string) {

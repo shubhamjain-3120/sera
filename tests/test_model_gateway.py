@@ -41,6 +41,7 @@ def session():
 def response(*, parsed=None, status="completed", output=None, incomplete=None):
     return SimpleNamespace(
         id="resp_123",
+        service_tier="fast",
         status=status,
         output_parsed=parsed,
         output=output or [],
@@ -51,7 +52,10 @@ def response(*, parsed=None, status="completed", output=None, incomplete=None):
 
 def gateway(responses, retries=2):
     client = SimpleNamespace(responses=FakeResponses(responses))
-    settings = Settings(openai_api_key="test", model_gateway_max_retries=retries)
+    settings = Settings(
+        openai_api_key="test", openai_reasoning_effort="high",
+        model_gateway_max_retries=retries,
+    )
     return ModelGateway(settings, client), client.responses
 
 

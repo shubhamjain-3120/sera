@@ -168,20 +168,6 @@ class EvidenceSnapshot(Base):
     run: Mapped[ProcessingRun] = relationship()
 
 
-class EvidenceBundle(Base):
-    """A frozen, case-scoped set of immutable evidence snapshots."""
-
-    __tablename__ = "evidence_bundles"
-    __table_args__ = (
-        UniqueConstraint("case_key", "bundle_sha256", name="uq_evidence_bundle_hash"),
-    )
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    case_key: Mapped[str] = mapped_column(String(64), index=True)
-    snapshot_ids: Mapped[list[str]] = mapped_column(JSON)
-    bundle_sha256: Mapped[str] = mapped_column(String(64), index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-
-
 class Agency(Base):
     """A filing agency whose own details are a trusted, non-document fact source."""
 
@@ -195,99 +181,22 @@ class Agency(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
-class FillPlan(Base):
-    __tablename__ = "fill_plans"
-    __table_args__ = (
-        # Agency details feed values into the plan, so the same template and
-        # evidence filed for a different agency is a different Fill Plan.
-        UniqueConstraint(
-            "template_version_id",
-            "evidence_bundle_id",
-            "agency_key",
-            "mapping_profile_hash",
-            name="uq_fill_plan_inputs",
-        ),
-    )
+class FormFill(Base):
+    __tablename__ = "form_fills"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     case_key: Mapped[str] = mapped_column(String(64), index=True)
-    agency_key: Mapped[str] = mapped_column(String(64), index=True)
-    mapping_profile_hash: Mapped[str] = mapped_column(String(64), default="legacy-profile-v1", index=True)
-    template_version_id: Mapped[str] = mapped_column(
-        ForeignKey("template_versions.id"), index=True
-    )
-    evidence_bundle_id: Mapped[str] = mapped_column(
-        ForeignKey("evidence_bundles.id"), index=True
-    )
-    current_revision: Mapped[int] = mapped_column(Integer, default=1)
+    template_version_id: Mapped[str] = mapped_column(ForeignKey("template_versions.id"), index=True)
+    evidence_snapshot_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    agency_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    answers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    model_execution_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    state: Mapped[str] = mapped_column(String(32), default="mapped", index=True)
+    output_storage_key: Mapped[str | None] = mapped_column(String(768), nullable=True)
+    output_filename: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    output_media_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    output_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     template_version: Mapped[TemplateVersion] = relationship()
-    evidence_bundle: Mapped[EvidenceBundle] = relationship()
-
-
-class FillPlanRevision(Base):
-    """Immutable mapping result. A changed proposal creates a new revision."""
-
-    __tablename__ = "fill_plan_revisions"
-    __table_args__ = (
-        UniqueConstraint("fill_plan_id", "revision", name="uq_fill_plan_revision"),
-    )
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    fill_plan_id: Mapped[str] = mapped_column(ForeignKey("fill_plans.id"), index=True)
-    revision: Mapped[int] = mapped_column(Integer)
-    mapper_version: Mapped[str] = mapped_column(String(64))
-    payload_sha256: Mapped[str] = mapped_column(String(64), index=True)
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    fill_plan: Mapped[FillPlan] = relationship()
-
-
-class VerificationReport(Base):
-    """Immutable verification result for one exact Fill Plan revision."""
-
-    __tablename__ = "verification_reports"
-    __table_args__ = (
-        UniqueConstraint(
-            "fill_plan_revision_id", "verifier_version", name="uq_verification_revision_version"
-        ),
-    )
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    fill_plan_revision_id: Mapped[str] = mapped_column(
-        ForeignKey("fill_plan_revisions.id"), index=True
-    )
-    status: Mapped[str] = mapped_column(String(32), index=True)
-    deterministic_version: Mapped[str] = mapped_column(String(64))
-    verifier_version: Mapped[str] = mapped_column(String(64))
-    provider: Mapped[str] = mapped_column(String(64))
-    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    input_sha256: Mapped[str] = mapped_column(String(64), index=True)
-    report_sha256: Mapped[str] = mapped_column(String(64), index=True)
-    report: Mapped[dict[str, Any]] = mapped_column(JSON)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    fill_plan_revision: Mapped[FillPlanRevision] = relationship()
-
-
-class ReviewDecision(Base):
-    """Append-only human decision pinned to source and resulting revisions."""
-
-    __tablename__ = "review_decisions"
-    __table_args__ = (
-        UniqueConstraint("resulting_revision_id", name="uq_review_resulting_revision"),
-    )
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    fill_plan_id: Mapped[str] = mapped_column(ForeignKey("fill_plans.id"), index=True)
-    source_revision_id: Mapped[str] = mapped_column(
-        ForeignKey("fill_plan_revisions.id"), index=True
-    )
-    resulting_revision_id: Mapped[str] = mapped_column(
-        ForeignKey("fill_plan_revisions.id"), unique=True, index=True
-    )
-    target_field_id: Mapped[str] = mapped_column(String(256), index=True)
-    action: Mapped[str] = mapped_column(String(32), index=True)
-    actor: Mapped[str] = mapped_column(String(256))
-    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    candidate_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    previous_value: Mapped[Any] = mapped_column(JSON, nullable=True)
-    new_value: Mapped[Any] = mapped_column(JSON, nullable=True)
-    detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

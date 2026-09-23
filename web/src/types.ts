@@ -167,69 +167,6 @@ export interface TemplateVersion {
   published_at: string;
 }
 
-export interface MappingIssue {
-  id: string;
-  code: string;
-  severity: "info" | "review" | "blocker";
-  target_id: string;
-  message: string;
-}
-
-export interface MappingCandidate {
-  id: string;
-  target_field_id: string;
-  snapshot_id?: string | null;
-  source_artifact_id?: string | null;
-  fact_id?: string | null;
-  fact_key?: string | null;
-  entity_id?: string | null;
-  entity_role?: string | null;
-  value: unknown;
-  canonical_value?: unknown;
-  write_value?: unknown;
-  raw_value: string;
-  value_type: string;
-  unit?: string | null;
-  date_context?: string | null;
-  period_context?: string | null;
-  origin: "evidence" | "derivation" | "human" | "agency";
-  resolution: "direct" | "normalized" | "derived" | "human";
-  mapping_method?: string | null;
-  evidence_fact_ids?: string[];
-  evidence_sources?: Array<{ fact_id: string; snapshot_id: string; artifact_id: string }>;
-  approval_state?: "system_approved" | "needs_review" | "human_approved" | null;
-  auto_approval_reasons?: string[];
-  model_execution_id?: string | null;
-  evidence_confidence: number;
-  match_score: number;
-  provenance: EvidenceLocation[];
-  uncertainty: string[];
-  contradicts: string[];
-  selectable: boolean;
-  review_required: boolean;
-  derivation?: { id: string; operation: string; input_ids: string[]; depth: number; as_of_date?: string | null };
-}
-
-export interface FillPlanTarget {
-  field: TemplateField;
-  selected_candidate_id?: string | null;
-  candidates: MappingCandidate[];
-  issues: MappingIssue[];
-  state: "proposed" | "unresolved" | "not_applicable" | "reviewed" | "dependency_changed";
-  review?: {
-    status: "approved" | "exception" | "needs_acknowledgement";
-    origin: "human";
-    action: string;
-    actor: string;
-    reason?: string | null;
-    decision_id: string;
-    required_exception: boolean;
-    prefilled_disposition?: "retain" | "replace" | "clear" | null;
-    terminal_authority: true;
-    dependency_notice?: { changed_target_id: string; acknowledged: boolean };
-  };
-}
-
 export interface Agency {
   key: string;
   name: string;
@@ -244,54 +181,8 @@ export interface CaseSummary {
   created_at: string;
 }
 
-export interface FillPlanSummary {
-  id: string;
-  case_key: string;
-  agency_key?: string;
-  template_version_id: string;
-  template_name: string;
-  target_artifact_id: string;
-  target_kind: "pdf" | "xlsx";
-  evidence_bundle_id: string;
-  evidence_bundle_sha256: string;
-  current_revision: number;
-  issue_count: number;
-  blocker_count: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface FillPlan extends FillPlanSummary {
-  revision_id: string;
-  mapper_version: string;
-  payload_sha256: string;
-  payload: {
-    mapper_version: string;
-    template_schema: TemplateSchema;
-    targets: FillPlanTarget[];
-    repeating_groups: Array<{ id: string; label: string; capacity: number; entity_ids: string[]; assigned_entity_ids: string[]; overflow_entity_ids: string[] }>;
-    derivations: Array<Record<string, unknown>>;
-    issues: MappingIssue[];
-    summary: { target_count: number; proposed_count: number; unresolved_count: number; issue_count: number; blocker_count: number; reviewed_count?: number; review_pending_count?: number };
-    evidence_bundle: { id: string; case_key: string; snapshot_ids: string[]; sha256: string };
-    preview_calculation?: { status: "stale" | "current"; changed_target_id: string; message: string };
-  };
-}
-
-export type ReviewAction = "approve" | "select_candidate" | "edit" | "clear" | "not_applicable" | "intentional_blank" | "retain_prefilled" | "acknowledge_dependency";
-
-export interface ReviewDecision {
-  id: string;
-  fill_plan_id: string;
-  source_revision: number;
-  resulting_revision: number;
-  target_field_id: string;
-  action: ReviewAction;
-  actor: string;
-  reason?: string | null;
-  candidate_id?: string | null;
-  previous_value: unknown;
-  new_value: unknown;
-  detail: Record<string, unknown>;
-  created_at: string;
-}
+export interface FormFillSnippet { text: string; artifact_id?: string; snapshot_id?: string; page?: number; rect?: number[]; sheet?: string; cell_range?: string }
+export interface FormFillField { field: TemplateField; write_value: unknown; origin?: "model" | "human" | "prefilled"; evidence_fact_ids?: string[]; source_block_ids?: string[]; assumption?: string | null; snippets?: FormFillSnippet[] }
+export interface FormFillEvidence { fact: EvidenceFact; snapshot_id?: string; artifact_id?: string; used: boolean; field_ids: string[] }
+export interface FormFillSummary { id: string; case_key: string; template_version_id: string; template_name: string; target_artifact_id: string; target_kind: "pdf" | "xlsx"; status: string; output_available?: boolean; output_error?: string | null; created_at?: string; updated_at?: string }
+export interface FormFill extends FormFillSummary { agency_key?: string; fields: FormFillField[]; evidence: FormFillEvidence[]; output_path?: string | null }

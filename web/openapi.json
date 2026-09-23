@@ -728,16 +728,16 @@
         }
       }
     },
-    "/api/v1/fill-plans": {
+    "/api/v1/form-fills": {
       "post": {
-        "summary": "Post Fill Plan",
-        "operationId": "post_fill_plan_api_v1_fill_plans_post",
+        "summary": "Post Form Fill",
+        "operationId": "post_form_fill_api_v1_form_fills_post",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FillPlanCreate"
+                "$ref": "#/components/schemas/FormFillCreate"
               }
             }
           }
@@ -748,7 +748,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RunResponse"
+                  "$ref": "#/components/schemas/FormFillRunResponse"
                 }
               }
             }
@@ -766,8 +766,8 @@
         }
       },
       "get": {
-        "summary": "List Fill Plans",
-        "operationId": "list_fill_plans_api_v1_fill_plans_get",
+        "summary": "List Form Fills",
+        "operationId": "list_form_fills_api_v1_form_fills_get",
         "parameters": [
           {
             "name": "case_key",
@@ -794,9 +794,9 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/FillPlanSummary"
+                    "$ref": "#/components/schemas/FormFillResponse"
                   },
-                  "title": "Response List Fill Plans Api V1 Fill Plans Get"
+                  "title": "Response List Form Fills Api V1 Form Fills Get"
                 }
               }
             }
@@ -814,18 +814,18 @@
         }
       }
     },
-    "/api/v1/fill-plans/{fill_plan_id}": {
+    "/api/v1/form-fills/{fill_id}": {
       "get": {
-        "summary": "Get Fill Plan",
-        "operationId": "get_fill_plan_api_v1_fill_plans__fill_plan_id__get",
+        "summary": "Get Form Fill",
+        "operationId": "get_form_fill_api_v1_form_fills__fill_id__get",
         "parameters": [
           {
-            "name": "fill_plan_id",
+            "name": "fill_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Fill Plan Id"
+              "title": "Fill Id"
             }
           }
         ],
@@ -835,7 +835,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FillPlanResponse"
+                  "$ref": "#/components/schemas/FormFillResponse"
                 }
               }
             }
@@ -851,18 +851,29 @@
             }
           }
         }
-      },
-      "put": {
-        "summary": "Put Fill Plan",
-        "operationId": "put_fill_plan_api_v1_fill_plans__fill_plan_id__put",
+      }
+    },
+    "/api/v1/form-fills/{fill_id}/fields/{field_id}": {
+      "patch": {
+        "summary": "Patch Form Field",
+        "operationId": "patch_form_field_api_v1_form_fills__fill_id__fields__field_id__patch",
         "parameters": [
           {
-            "name": "fill_plan_id",
+            "name": "fill_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Fill Plan Id"
+              "title": "Fill Id"
+            }
+          },
+          {
+            "name": "field_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Field Id"
             }
           }
         ],
@@ -871,7 +882,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FillPlanUpdate"
+                "$ref": "#/components/schemas/FormFieldUpdate"
               }
             }
           }
@@ -882,7 +893,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FillPlanResponse"
+                  "$ref": "#/components/schemas/FormFillResponse"
                 }
               }
             }
@@ -900,38 +911,28 @@
         }
       }
     },
-    "/api/v1/fill-plans/{fill_plan_id}/review-decisions": {
+    "/api/v1/form-fills/{fill_id}/approve-and-export": {
       "post": {
-        "summary": "Post Review Decision",
-        "operationId": "post_review_decision_api_v1_fill_plans__fill_plan_id__review_decisions_post",
+        "summary": "Approve And Export",
+        "operationId": "approve_and_export_api_v1_form_fills__fill_id__approve_and_export_post",
         "parameters": [
           {
-            "name": "fill_plan_id",
+            "name": "fill_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Fill Plan Id"
+              "title": "Fill Id"
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReviewDecisionCreate"
-              }
-            }
-          }
-        },
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReviewDecisionResponse"
+                  "$ref": "#/components/schemas/FormFillResponse"
                 }
               }
             }
@@ -947,18 +948,30 @@
             }
           }
         }
-      },
+      }
+    },
+    "/api/v1/form-fills/{fill_id}/output": {
       "get": {
-        "summary": "List Review Decisions",
-        "operationId": "list_review_decisions_api_v1_fill_plans__fill_plan_id__review_decisions_get",
+        "summary": "Form Fill Output",
+        "operationId": "form_fill_output_api_v1_form_fills__fill_id__output_get",
         "parameters": [
           {
-            "name": "fill_plan_id",
+            "name": "fill_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Fill Plan Id"
+              "title": "Fill Id"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
             }
           }
         ],
@@ -967,13 +980,7 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ReviewDecisionResponse"
-                  },
-                  "title": "Response List Review Decisions Api V1 Fill Plans  Fill Plan Id  Review Decisions Get"
-                }
+                "schema": {}
               }
             }
           },
@@ -1182,62 +1189,6 @@
         ],
         "title": "ChoiceOption",
         "description": "Visible choice text and the value AcroForm expects when writing it."
-      },
-      "DerivationSpec": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "target_field_id": {
-            "type": "string",
-            "title": "Target Field Id"
-          },
-          "operation": {
-            "type": "string",
-            "enum": [
-              "concat",
-              "sum",
-              "subtract",
-              "multiply",
-              "divide",
-              "date_diff_years"
-            ],
-            "title": "Operation"
-          },
-          "input_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "minItems": 1,
-            "title": "Input Ids"
-          },
-          "separator": {
-            "type": "string",
-            "title": "Separator",
-            "default": " "
-          },
-          "as_of_date": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "As Of Date"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "target_field_id",
-          "operation",
-          "input_ids"
-        ],
-        "title": "DerivationSpec"
       },
       "DraftResponse": {
         "properties": {
@@ -1858,7 +1809,30 @@
         ],
         "title": "EvidenceSourceResponse"
       },
-      "FillPlanCreate": {
+      "FormFieldUpdate": {
+        "properties": {
+          "write_value": {
+            "title": "Write Value"
+          },
+          "evidence_fact_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Fact Ids"
+          }
+        },
+        "type": "object",
+        "title": "FormFieldUpdate"
+      },
+      "FormFillCreate": {
         "properties": {
           "case_key": {
             "type": "string",
@@ -1895,19 +1869,6 @@
               }
             ],
             "title": "Agency Key"
-          },
-          "idempotency_key": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 128,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Idempotency Key"
           }
         },
         "type": "object",
@@ -1915,9 +1876,9 @@
           "case_key",
           "template_version_id"
         ],
-        "title": "FillPlanCreate"
+        "title": "FormFillCreate"
       },
-      "FillPlanResponse": {
+      "FormFillResponse": {
         "properties": {
           "id": {
             "type": "string",
@@ -1931,37 +1892,90 @@
             "type": "string",
             "title": "Template Version Id"
           },
-          "template_name": {
+          "evidence_snapshot_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence Snapshot Ids"
+          },
+          "agency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agency Key"
+          },
+          "answers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Answers"
+          },
+          "state": {
             "type": "string",
-            "title": "Template Name"
+            "title": "State"
           },
-          "target_artifact_id": {
-            "type": "string",
-            "title": "Target Artifact Id"
+          "model_execution_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Execution Id"
           },
-          "target_kind": {
-            "type": "string",
-            "title": "Target Kind"
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
           },
-          "evidence_bundle_id": {
-            "type": "string",
-            "title": "Evidence Bundle Id"
+          "output_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Filename"
           },
-          "evidence_bundle_sha256": {
-            "type": "string",
-            "title": "Evidence Bundle Sha256"
+          "output_media_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Media Type"
           },
-          "current_revision": {
-            "type": "integer",
-            "title": "Current Revision"
-          },
-          "issue_count": {
-            "type": "integer",
-            "title": "Issue Count"
-          },
-          "blocker_count": {
-            "type": "integer",
-            "title": "Blocker Count"
+          "output_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Sha256"
           },
           "created_at": {
             "type": "string",
@@ -1973,101 +1987,69 @@
             "format": "date-time",
             "title": "Updated At"
           },
-          "revision_id": {
-            "type": "string",
-            "title": "Revision Id"
-          },
-          "mapper_version": {
-            "type": "string",
-            "title": "Mapper Version"
-          },
-          "payload_sha256": {
-            "type": "string",
-            "title": "Payload Sha256"
-          },
-          "payload": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Payload"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "case_key",
-          "template_version_id",
-          "template_name",
-          "target_artifact_id",
-          "target_kind",
-          "evidence_bundle_id",
-          "evidence_bundle_sha256",
-          "current_revision",
-          "issue_count",
-          "blocker_count",
-          "created_at",
-          "updated_at",
-          "revision_id",
-          "mapper_version",
-          "payload_sha256",
-          "payload"
-        ],
-        "title": "FillPlanResponse"
-      },
-      "FillPlanSummary": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "case_key": {
-            "type": "string",
-            "title": "Case Key"
-          },
-          "template_version_id": {
-            "type": "string",
-            "title": "Template Version Id"
+          "approved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
           },
           "template_name": {
             "type": "string",
-            "title": "Template Name"
+            "title": "Template Name",
+            "default": ""
           },
           "target_artifact_id": {
             "type": "string",
-            "title": "Target Artifact Id"
+            "title": "Target Artifact Id",
+            "default": ""
           },
           "target_kind": {
             "type": "string",
-            "title": "Target Kind"
+            "title": "Target Kind",
+            "default": ""
           },
-          "evidence_bundle_id": {
+          "status": {
             "type": "string",
-            "title": "Evidence Bundle Id"
+            "title": "Status",
+            "default": "mapped"
           },
-          "evidence_bundle_sha256": {
-            "type": "string",
-            "title": "Evidence Bundle Sha256"
+          "output_available": {
+            "type": "boolean",
+            "title": "Output Available",
+            "default": false
           },
-          "current_revision": {
-            "type": "integer",
-            "title": "Current Revision"
+          "output_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Error"
           },
-          "issue_count": {
-            "type": "integer",
-            "title": "Issue Count"
+          "fields": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Fields"
           },
-          "blocker_count": {
-            "type": "integer",
-            "title": "Blocker Count"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
+          "evidence": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Evidence"
           }
         },
         "type": "object",
@@ -2075,52 +2057,130 @@
           "id",
           "case_key",
           "template_version_id",
-          "template_name",
-          "target_artifact_id",
-          "target_kind",
-          "evidence_bundle_id",
-          "evidence_bundle_sha256",
-          "current_revision",
-          "issue_count",
-          "blocker_count",
+          "evidence_snapshot_ids",
+          "answers",
+          "state",
           "created_at",
           "updated_at"
         ],
-        "title": "FillPlanSummary"
+        "title": "FormFillResponse"
       },
-      "FillPlanUpdate": {
+      "FormFillRunResponse": {
         "properties": {
-          "expected_revision": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "artifact_id": {
+            "type": "string",
+            "title": "Artifact Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "progress": {
             "type": "integer",
-            "title": "Expected Revision"
+            "title": "Progress"
           },
-          "selected_candidates": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "type": "object",
-            "title": "Selected Candidates"
+          "provider": {
+            "type": "string",
+            "title": "Provider"
           },
-          "derivations": {
-            "items": {
-              "$ref": "#/components/schemas/DerivationSpec"
-            },
-            "type": "array",
-            "title": "Derivations"
+          "provider_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Job Id"
+          },
+          "parser_version": {
+            "type": "string",
+            "title": "Parser Version"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "form_fill_id": {
+            "type": "string",
+            "title": "Form Fill Id"
           }
         },
         "type": "object",
         "required": [
-          "expected_revision"
+          "id",
+          "artifact_id",
+          "status",
+          "stage",
+          "progress",
+          "provider",
+          "provider_job_id",
+          "parser_version",
+          "result",
+          "error",
+          "created_at",
+          "started_at",
+          "finished_at",
+          "form_fill_id"
         ],
-        "title": "FillPlanUpdate"
+        "title": "FormFillRunResponse"
       },
       "HTTPValidationError": {
         "properties": {
@@ -2320,170 +2380,6 @@
           "capacity"
         ],
         "title": "RepeatingGroup"
-      },
-      "ReviewDecisionCreate": {
-        "properties": {
-          "expected_revision": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Expected Revision"
-          },
-          "target_field_id": {
-            "type": "string",
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "Target Field Id"
-          },
-          "action": {
-            "type": "string",
-            "enum": [
-              "approve",
-              "select_candidate",
-              "edit",
-              "clear",
-              "not_applicable",
-              "intentional_blank",
-              "retain_prefilled",
-              "acknowledge_dependency"
-            ],
-            "title": "Action"
-          },
-          "actor": {
-            "type": "string",
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "Actor"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 4000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          },
-          "candidate_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Candidate Id"
-          },
-          "value": {
-            "title": "Value"
-          }
-        },
-        "type": "object",
-        "required": [
-          "expected_revision",
-          "target_field_id",
-          "action",
-          "actor"
-        ],
-        "title": "ReviewDecisionCreate"
-      },
-      "ReviewDecisionResponse": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "fill_plan_id": {
-            "type": "string",
-            "title": "Fill Plan Id"
-          },
-          "source_revision_id": {
-            "type": "string",
-            "title": "Source Revision Id"
-          },
-          "source_revision": {
-            "type": "integer",
-            "title": "Source Revision"
-          },
-          "resulting_revision_id": {
-            "type": "string",
-            "title": "Resulting Revision Id"
-          },
-          "resulting_revision": {
-            "type": "integer",
-            "title": "Resulting Revision"
-          },
-          "target_field_id": {
-            "type": "string",
-            "title": "Target Field Id"
-          },
-          "action": {
-            "type": "string",
-            "title": "Action"
-          },
-          "actor": {
-            "type": "string",
-            "title": "Actor"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          },
-          "candidate_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Candidate Id"
-          },
-          "previous_value": {
-            "title": "Previous Value"
-          },
-          "new_value": {
-            "title": "New Value"
-          },
-          "detail": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Detail"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "fill_plan_id",
-          "source_revision_id",
-          "source_revision",
-          "resulting_revision_id",
-          "resulting_revision",
-          "target_field_id",
-          "action",
-          "actor",
-          "reason",
-          "candidate_id",
-          "detail",
-          "created_at"
-        ],
-        "title": "ReviewDecisionResponse"
       },
       "RunResponse": {
         "properties": {
